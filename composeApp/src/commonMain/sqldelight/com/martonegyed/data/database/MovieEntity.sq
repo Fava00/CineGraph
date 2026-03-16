@@ -1,0 +1,117 @@
+CREATE TABLE MovieEntity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    letterboxdUri TEXT UNIQUE,
+    imdbId TEXT UNIQUE,
+
+    isWatched INTEGER NOT NULL DEFAULT 0,
+    inWatchlist INTEGER NOT NULL DEFAULT 0,
+    isCached INTEGER NOT NULL DEFAULT 0,
+
+    posterPath TEXT,
+    backdropPath TEXT,
+    overview TEXT,
+    runtimeMinutes INTEGER,
+    tmdbId TEXT
+);
+
+CREATE TABLE MovieLogEntity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    movieId INTEGER NOT NULL,
+    watchedDate TEXT,
+    rating REAL,
+    review TEXT,
+    isRewatch INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (movieId) REFERENCES MovieEntity(id) ON DELETE CASCADE
+);
+
+CREATE TABLE CustomList (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE ListEntry (
+    listId INTEGER NOT NULL,
+    movieId INTEGER NOT NULL,
+    PRIMARY KEY (listId, movieId),
+    FOREIGN KEY (listId) REFERENCES CustomList(id) ON DELETE CASCADE,
+    FOREIGN KEY (movieId) REFERENCES MovieEntity(id) ON DELETE CASCADE
+);
+
+
+getAllMovies:
+SELECT * FROM MovieEntity;
+
+getWatchedMovies:
+SELECT
+    MovieEntity.id,
+    MovieEntity.name,
+    MovieEntity.year,
+    MovieEntity.letterboxdUri,
+    MovieEntity.imdbId,
+    MovieEntity.isWatched,
+    MovieEntity.inWatchlist,
+    MovieEntity.posterPath,
+    MovieEntity.backdropPath,
+    MovieEntity.overview,
+    MovieEntity.runtimeMinutes,
+    MovieEntity.tmdbId,
+    MovieLogEntity.rating,
+    MovieLogEntity.watchedDate,
+    MovieLogEntity.isRewatch
+FROM MovieEntity
+LEFT JOIN MovieLogEntity ON MovieLogEntity.id = (
+    SELECT id FROM MovieLogEntity
+    WHERE movieId = MovieEntity.id
+    ORDER BY watchedDate DESC
+    LIMIT 1
+)
+WHERE MovieEntity.isWatched = 1;
+
+deleteAllMovies:
+DELETE FROM MovieEntity;
+
+
+insertMovie:
+INSERT INTO MovieEntity(name, year, letterboxdUri, imdbId, isWatched, inWatchlist, posterPath, backdropPath, overview, runtimeMinutes, tmdbId)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+
+
+getMoviesToEnrich:
+SELECT * FROM MovieEntity
+WHERE posterPath IS NULL AND tmdbId IS NULL
+LIMIT 40;
+
+updateMovieWithTmdb:
+UPDATE MovieEntity
+SET posterPath = ?, backdropPath = ?, overview = ?, runtimeMinutes = ?, tmdbId = ?
+WHERE id = ?;
+
+getMovieByUniqueData:
+SELECT * FROM MovieEntity
+WHERE (letterboxdUri IS NOT NULL AND letterboxdUri = :uri)
+   OR (imdbId IS NOT NULL AND imdbId = :imdb)
+   OR (name = :name AND year = :year)
+LIMIT 1;
+
+getLastInsertId:
+SELECT last_insert_rowid();
+
+updateMovieFlags:
+UPDATE MovieEntity SET isWatched = :isWatched, inWatchlist = :inWatchlist WHERE id = :id;
+
+checkIfExists:
+SELECT * FROM MovieEntity
+WHERE letterboxdUri = :uri
+   OR imdbId = :imdb
+   OR (name = :name AND year = :year)
+LIMIT 1;
+
+insertMovieLog:
+INSERT INTO MovieLogEntity(movieId, watchedDate, rating, review, isRewatch)
+VALUES (?, ?, ?, ?, ?);
+
+getLogsForMovie:
+SELECT * FROM MovieLogEntity WHERE movieId = ? ORDER BY watchedDate DESC;
