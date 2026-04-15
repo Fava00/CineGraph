@@ -5,7 +5,6 @@ class CsvImportService {
     fun parseCsv(csvContent: String, platform: String, type: String): List<Map<String, Any>> {
         val rows = parseCsvString(csvContent)
         if (rows.isEmpty()) return emptyList()
-
         var headerIndex = 0
         for (i in rows.indices) {
             val rowLower = rows[i].map { it.lowercase().trim() }

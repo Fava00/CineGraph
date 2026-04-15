@@ -5,21 +5,33 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-val LetterboxdBlue = Color(0xFF40bcf4)
-val LetterboxdDarkGrey = Color(0xFF14181c)
-val LetterboxdGreen = Color(0xFF00E054)
-val LetterboxdSurface = Color(0xFF1F2326)
-val LetterboxdScrim = Color(0xFFB10808)
-val LetterboxdTertiary = Color(0xFFE9DB14)
+val CineBackground = Color(0xFF0E1014)
+val CineSurface = Color(0xFF1A1D23)
+val CineSurfaceVariant = Color(0xFF252930)
+val CinePrimary = Color(0xFFE8A030)
+val CineGreen = Color(0xFF21A705)
+val CineSecondary = Color(0xFF5BA4CF)
+val CineTertiary = Color(0xFFE0C060)
+val CineError = Color(0xFFCF6679)
+val CineOnPrimary = Color(0xFF1A1100)
+val CineOnBackground = Color(0xFFE0DDD8)
+val CineOnSurface = Color(0xFFE0DDD8)
+val CineOnSurfaceVariant = Color(0xFF9A9590)
 
 
 private val CineGraphColorScheme = darkColorScheme(
-    primary = LetterboxdGreen,
-    secondary = LetterboxdBlue,
-    background = LetterboxdDarkGrey,
-    surface = LetterboxdSurface,
-    scrim = LetterboxdScrim,
-    tertiary = LetterboxdTertiary
+    primary = CinePrimary,
+    onPrimary = CineOnPrimary,
+    secondary = CineSecondary,
+    tertiary = CineTertiary,
+    background = CineBackground,
+    onBackground = CineOnBackground,
+    surface = CineSurface,
+    onSurface = CineOnSurface,
+    surfaceVariant = CineSurfaceVariant,
+    onSurfaceVariant = CineOnSurfaceVariant,
+    error = CineError,
+    scrim = CineGreen
 )
 
 @Composable

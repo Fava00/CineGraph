@@ -3,7 +3,6 @@ import java.util.Properties
 import java.io.FileInputStream
 
 
-
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidApplication)
@@ -27,7 +26,9 @@ kotlin {
             jvmTarget.set(JvmTarget.JVM_11)
         }
     }
-    
+
+    jvm("desktop")
+
     listOf(
         iosArm64(),
         iosSimulatorArm64()
@@ -37,18 +38,7 @@ kotlin {
             isStatic = true
         }
     }
-    
-    js {
-        browser()
-        binaries.executable()
-    }
-    
-    //@OptIn(ExperimentalWasmDsl::class)
-    //wasmJs {
-    //    browser()
-    //    binaries.executable()
-    //}
-    
+
     sourceSets {
         androidMain.dependencies {
             implementation(libs.compose.uiToolingPreview)
@@ -57,6 +47,7 @@ kotlin {
             implementation(libs.ktor.client.okhttp)
         }
         commonMain.dependencies {
+            implementation(libs.kotlinx.datetime)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)
@@ -66,39 +57,44 @@ kotlin {
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
 
-            // Ktor
             implementation(libs.ktor.client.core)
             implementation(libs.io.ktor.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
 
-            // Koin
             implementation(libs.koin.core)
             implementation(libs.koin.compose)
 
-            // Voyager
             implementation(libs.voyager.navigator)
             implementation(libs.voyager.screenmodel)
             implementation(libs.voyager.transitions)
             implementation(libs.voyager.koin)
 
-            // Utils
             implementation(compose.materialIconsExtended)
             implementation(libs.filekit.compose)
 
-            // Coil (Képek)
             implementation(libs.coil.compose)
             implementation(libs.coil.network.ktor)
 
-            // SQLDelight Coroutines
             implementation(libs.coroutines.extensions)
         }
 
         iosMain.dependencies {
             implementation(libs.sqldelight.native)
-            implementation("io.ktor:ktor-client-darwin:3.4.0")
+            implementation(libs.ktor.client.darwin)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+        }
+
+        val desktopMain by getting {
+            dependencies {
+                implementation(compose.desktop.currentOs)
+                implementation(libs.sqldelight.sqlite.driver)
+                implementation(libs.ktor.client.java)
+                implementation(libs.coil.compose)
+                implementation(libs.coil.network.ktor)
+                implementation(libs.kotlinx.coroutines.swing)
+            }
         }
     }
 }
@@ -147,6 +143,12 @@ sqldelight {
         create("CineGraphDatabase") {
             packageName.set("com.martonegyed.data.database")
         }
+    }
+}
+
+compose.desktop {
+    application {
+        mainClass = "com.martonegyed.MainKt"
     }
 }
 

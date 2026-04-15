@@ -2,13 +2,11 @@ package com.martonegyed.presentation.screens.import
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.martonegyed.data.local.DataSyncManager
 import com.martonegyed.data.local.CsvImportService
 import com.martonegyed.data.remote.TmdbApiService
-import com.martonegyed.data.remote.TmdbMovie
 import com.martonegyed.data.database.CineGraphDatabase
 import io.github.vinceglb.filekit.core.PlatformFile
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,9 +23,9 @@ sealed class SyncState {
 class ImportScreenModel(
     private val csvService: CsvImportService,
     private val tmdbService: TmdbApiService,
-    private val database: CineGraphDatabase
+    private val database: CineGraphDatabase,
+    private val dataSyncManager: DataSyncManager
 ) : ScreenModel {
-
     private val _state = MutableStateFlow<SyncState>(SyncState.Idle)
     val state: StateFlow<SyncState> = _state.asStateFlow()
 
@@ -35,6 +33,9 @@ class ImportScreenModel(
 
     private val _stagedCount = MutableStateFlow(0)
     val stagedCount = _stagedCount.asStateFlow()
+
+    private val _newMoviesCount = MutableStateFlow(0)
+    val newMoviesCount = _newMoviesCount.asStateFlow()
 
     fun stageMultipleLetterboxdFiles(files: List<PlatformFile>) {
         screenModelScope.launch {
@@ -61,6 +62,7 @@ class ImportScreenModel(
                 }
 
                 _stagedCount.value = stagedMovies.size
+                recomputeNewMoviesCount()
                 _state.value = SyncState.Idle
             } catch (e: IllegalArgumentException) {
                 _state.value = SyncState.Error(e.message ?: "Invalid CSV format.")
@@ -81,6 +83,7 @@ class ImportScreenModel(
                 mergeIntoStaged(parsedData, type)
 
                 _stagedCount.value = stagedMovies.size
+                recomputeNewMoviesCount()
                 _state.value = SyncState.Idle
             } catch (e: IllegalArgumentException) {
                 _state.value = SyncState.Error(e.message ?: "Invalid CSV format.")
@@ -88,6 +91,34 @@ class ImportScreenModel(
                 _state.value = SyncState.Error("Failed to parse CSV: ${e.message}")
             }
         }
+    }
+
+    private suspend fun recomputeNewMoviesCount() {
+        val existing = database.movieEntityQueries
+            .getAllMovieKeys()
+            .executeAsList()
+
+        val existingUris = existing.mapNotNull { it.letterboxdUri }.toHashSet()
+        val existingImdbs = existing.mapNotNull { it.imdbId }.toHashSet()
+        val existingNameYear = existing.map { it.name.lowercase() to it.year.toInt() }.toHashSet()
+        var newCount = 0
+        for (staged in stagedMovies.values) {
+            val name = staged["name"]?.toString()?.trim() ?: "Unknown"
+            val yearInt = staged["year"] as? Int ?: 0
+            val uri = staged["letterboxdUri"]?.toString()
+            val imdb = staged["imdbId"]?.toString()
+
+            val isExisting = when {
+                !uri.isNullOrBlank() && existingUris.contains(uri) -> true
+                !imdb.isNullOrBlank() && existingImdbs.contains(imdb) -> true
+                yearInt > 0 && existingNameYear.contains(name.lowercase() to yearInt) -> true
+                else -> false
+            }
+
+            if (!isExisting) newCount++
+        }
+
+        _newMoviesCount.value = newCount
     }
 
 
@@ -98,7 +129,8 @@ class ImportScreenModel(
 
         for (movieData in parsedData) {
             val name = movieData["name"]?.toString()?.trim() ?: "Unknown"
-            val year = movieData["year"]?.toString() ?: "0"
+            val yearStr = movieData["year"]?.toString() ?: "0"
+            val yearInt = yearStr.toIntOrNull() ?: 0
             var uri = movieData["letterboxdUri"]?.toString()
             val imdb = movieData["imdbId"]?.toString()
 
@@ -109,7 +141,7 @@ class ImportScreenModel(
             }
 
 
-            val key = "${name.lowercase()}_$year"
+            val key = "${name.lowercase()}_$yearInt"
 
             if (stagedMovies.containsKey(key)) {
                 val existing = stagedMovies[key]!!
@@ -128,6 +160,7 @@ class ImportScreenModel(
             } else {
                 val newMap = movieData.toMutableMap()
                 newMap["letterboxdUri"] = uri as Any
+                newMap["year"] = yearInt
                 newMap["isWatched"] = isWatchedFile
                 newMap["inWatchlist"] = isWatchlistFile
                 newMap["logs"] = mutableListOf(movieData)
@@ -140,162 +173,48 @@ class ImportScreenModel(
 
     fun commitToDatabase() {
         screenModelScope.launch {
-            _state.value = SyncState.Loading("Updating database with ${stagedMovies.size} unique movies...")
+            val stagedSnapshot = stagedMovies.values.map { it.toMap() }
 
-            database.movieEntityQueries.transaction {
-                for (staged in stagedMovies.values) {
-                    val name = staged["name"]?.toString() ?: "Unknown"
-                    val year = (staged["year"] as? Int)?.toLong() ?: 0L
-                    val uri = staged["letterboxdUri"]?.toString()
-                    val imdb = staged["imdbId"]?.toString()
+            val actuallyNew = stagedSnapshot.count { staged ->
+                val name = staged["name"]?.toString()?.trim() ?: "Unknown"
+                val yearInt = staged["year"] as? Int ?: 0
+                val uri = staged["letterboxdUri"]?.toString()
+                val imdb = staged["imdbId"]?.toString()
 
-                    val explicitWatched = staged["isWatched"] == true
-                    val inWatchlist = if (staged["inWatchlist"] == true) 1L else 0L
-                    val logs = staged["logs"] as? List<Map<String, Any>> ?: emptyList()
+                val existing = database.movieEntityQueries.getMovieByUniqueData(
+                    uri = uri,
+                    imdb = imdb,
+                    name = name,
+                    year = yearInt.toLong()
+                ).executeAsOneOrNull()
 
-                    val hasAnyLog = logs.any {
-                        (it["rating"] as? Double)?.let { r -> r > 0.0 } == true ||
-                                !it["watchedDate"]?.toString().isNullOrEmpty() ||
-                                !it["userReview"]?.toString().isNullOrEmpty()
-                    }
-
-                    val isWatchedFlag = if (explicitWatched || hasAnyLog) 1L else 0L
-
-
-                    val existingMovie = database.movieEntityQueries.getMovieByUniqueData(
-                        uri = uri, imdb = imdb, name = name, year = year
-                    ).executeAsOneOrNull()
-
-                    val movieId: Long
-
-                    if (existingMovie != null) {
-                        println("💾 DB FRISSÍTÉS: [$name ($year)] már létezik (ID: ${existingMovie.id}). Flagek frissítése...")
-                        val mergedWatched = if (existingMovie.isWatched == 1L || isWatchedFlag == 1L) 1L else 0L
-                        val mergedWatchlist = if (existingMovie.inWatchlist == 1L || inWatchlist == 1L) 1L else 0L
-
-                        database.movieEntityQueries.updateMovieFlags(mergedWatched, mergedWatchlist, existingMovie.id)
-                        movieId = existingMovie.id
-                    } else {
-                        println("💾 DB ÚJ BESZÚRÁS: [$name ($year)] bekerült az adatbázisba.")
-                        database.movieEntityQueries.insertMovie(
-                            name = name, year = year, letterboxdUri = uri, imdbId = imdb,
-                            isWatched = isWatchedFlag, inWatchlist = inWatchlist,
-                            posterPath = null, backdropPath = null, overview = null, runtimeMinutes = null, tmdbId = null
-                        )
-                        movieId = database.movieEntityQueries.getLastInsertId().executeAsOne()
-                    }
-
-                    val mergedLogsByDate = mutableMapOf<String, MutableMap<String, Any>>()
-                    for (log in logs) {
-                        val date = log["watchedDate"]?.toString() ?: "unknown_date"
-                        if (mergedLogsByDate.containsKey(date)) {
-                            val existingLog = mergedLogsByDate[date]!!
-                            if (existingLog["rating"] == null && log["rating"] != null) existingLog["rating"] = log["rating"]!!
-                            if (existingLog["userReview"] == null && log["userReview"] != null) existingLog["userReview"] = log["userReview"]!!
-                            if (log["isRewatch"] == true) existingLog["isRewatch"] = true
-                        } else {
-                            mergedLogsByDate[date] = log.toMutableMap()
-                        }
-                    }
-
-                    for (log in mergedLogsByDate.values) {
-                        val rating = log["rating"] as? Double
-                        val watchedDate = log["watchedDate"]?.toString()
-                        val review = log["userReview"]?.toString()
-                        val isRewatch = if (log["isRewatch"] == true) 1L else 0L
-
-                        if (!watchedDate.isNullOrEmpty() || rating != null || !review.isNullOrEmpty()) {
-                            println("📝 DB NAPLÓ: [$name] -> Dátum: $watchedDate, Rating: $rating")
-                            database.movieEntityQueries.insertMovieLog(
-                                movieId = movieId,
-                                watchedDate = if (watchedDate == "unknown_date") null else watchedDate,
-                                rating = rating,
-                                review = review,
-                                isRewatch = isRewatch
-                            )
-                        }
-                    }
+                if (existing == null) {
+                    println("⚠ NEW DETECTED: [$name ($yearInt)] uri=$uri imdb=$imdb")
+                } else {
+                    println("✅ EXISTING DETECTED: [$name ($yearInt)] id=${existing.id}")
                 }
+
+                existing == null
             }
 
-            val savedCount = stagedMovies.size
+            if (actuallyNew == 0) {
+                _state.value = SyncState.Loading("Updating logs and flags for existing movies...")
+            } else {
+                _state.value = SyncState.Loading(
+                    "Adding $actuallyNew new movies and updating existing ones..."
+                )
+            }
             clearStaged()
-            _state.value = SyncState.Success("Successfully saved $savedCount unique movies!")
-            enrichDatabaseWithTmdb()
-        }
-    }
+            reset()
 
-    private fun enrichDatabaseWithTmdb() {
-        println("--- TMDB DÚSÍTÁS ELKEZDŐDÖTT ---")
-        var totalEnriched = 0
-
-        screenModelScope.launch {
-            var hasMoreToEnrich = true
-
-            while (hasMoreToEnrich) {
-                val moviesBatch = database.movieEntityQueries.getMoviesToEnrich().executeAsList()
-
-                if (moviesBatch.isEmpty()) {
-                    hasMoreToEnrich = false
-                    break
-                }
-
-                val enrichmentResults = moviesBatch.map { entity ->
-                    async {
-                        try {
-                            var bestMatch: TmdbMovie? = null
-
-                            if (!entity.imdbId.isNullOrEmpty()) {
-                                val findResult = tmdbService.findByImdbId(entity.imdbId)
-                                bestMatch = findResult?.movieResults?.firstOrNull()
-                            }
-
-                            if (bestMatch == null) {
-                                val searchResult = tmdbService.searchMovie(entity.name, entity.year.toInt())
-                                bestMatch = searchResult?.results?.firstOrNull()
-                            }
-
-                            Pair(entity, bestMatch)
-                        } catch (e: Exception) {
-                            Pair(entity, null)
-                        }
-                    }
-                }.awaitAll()
-
-                database.movieEntityQueries.transaction {
-                    for ((entity, bestMatch) in enrichmentResults) {
-
-                        if (bestMatch != null) {
-                            database.movieEntityQueries.updateMovieWithTmdb(
-                                posterPath = bestMatch.posterPath,
-                                backdropPath = bestMatch.backdropPath,
-                                overview = bestMatch.overview,
-                                runtimeMinutes = null,
-                                tmdbId = bestMatch.id.toString(),
-                                id = entity.id
-                            )
-                        } else {
-                            database.movieEntityQueries.updateMovieWithTmdb(
-                                posterPath = null, backdropPath = null, overview = null, runtimeMinutes = null,
-                                tmdbId = "-1", id = entity.id
-                            )
-                        }
-                    }
-                }
-
-                totalEnriched += moviesBatch.size
-                println("Feldolgozva eddig: $totalEnriched film...")
-
-
-                delay(500)
-            }
-            println("--- TMDB DÚSÍTÁS BEFEJEZŐDÖTT! Összesen feldolgozva: $totalEnriched ---")
+            dataSyncManager.startImportAndEnrich(stagedMovies = stagedSnapshot)
         }
     }
 
     fun clearStaged() {
         stagedMovies.clear()
         _stagedCount.value = 0
+        _newMoviesCount.value = 0
     }
 
     fun restoreBackup(file: PlatformFile) {

@@ -1,6 +1,6 @@
 package com.martonegyed
 
-class Greeting {
+class reeting {
     private val platform = getPlatform()
 
     fun greet(): String {
