@@ -22,7 +22,6 @@ actual class DatabaseDriverFactory {
                 CineGraphDatabase.Schema.migrate(it, oldVersion, CineGraphDatabase.Schema.version)
             }
         }*/
-
         return driver
     }
 }

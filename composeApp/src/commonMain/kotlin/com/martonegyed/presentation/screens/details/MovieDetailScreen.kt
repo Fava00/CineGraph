@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
+import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
 import com.martonegyed.core.util.revenueFormater
@@ -41,6 +43,16 @@ import com.martonegyed.domain.model.Movie
 import com.martonegyed.domain.model.Person
 import kotlin.math.round
 import com.martonegyed.domain.model.SimilarMovie
+import com.martonegyed.core.ui.adaptive.AdaptiveLayout
+import com.martonegyed.core.ui.adaptive.AdaptiveScaffoldTokens
+import com.martonegyed.core.ui.adaptive.MovieDetailTokens
+import com.martonegyed.core.ui.languageDisplayName
+import com.martonegyed.presentation.components.common.openPersonCollection
+import com.martonegyed.presentation.components.details.FullCrewSheet
+import com.martonegyed.presentation.components.common.HorizontalRow
+import com.martonegyed.presentation.components.details.MetaTag
+import com.martonegyed.presentation.components.details.SectionTitle
+import com.martonegyed.presentation.screens.statistics.StatEntityType
 
 data class MovieDetailScreen(val movie: Movie) : Screen {
 
@@ -55,6 +67,7 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         val isEnriching by screenModel.isEnriching.collectAsState()
         val uriHandler = LocalUriHandler.current
         var showMoreMenu by remember { mutableStateOf(false) }
+        var showFullCrewSheet by remember { mutableStateOf(false) }
 
         LaunchedEffect(movie.id) {
             screenModel.init(movie)
@@ -94,7 +107,7 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                                 modifier = Modifier
                                     .size(20.dp)
                                     .padding(end = 8.dp),
-                                color = colors.scrim,
+                                color = colors.inversePrimary,
                                 strokeWidth = 2.dp
                             )
                         }
@@ -172,12 +185,41 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                 )
             }
         ) { paddingValues ->
-            MovieDetailContent(
-                movie = m,
-                logs = logs,
-                isEnriching = isEnriching,
-                paddingValues = paddingValues
-            )
+            AdaptiveLayout(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .background(colors.background)
+            ) { adaptive ->
+                MovieDetailContent(
+                    movie = m,
+                    logs = logs,
+                    isEnriching = isEnriching,
+                    scaffoldTokens = adaptive.tokens.scaffold,
+                    detailTokens = adaptive.tokens.movieDetail,
+                    navigator = navigator,
+                    onShowFullCrew = { showFullCrewSheet = true }
+                )
+
+                if (showFullCrewSheet) {
+                    ModalBottomSheet(
+                        onDismissRequest = { showFullCrewSheet = false },
+                        sheetState = rememberModalBottomSheetState(
+                            skipPartiallyExpanded = true
+                        ),
+                        containerColor = colors.surface
+                    ) {
+                        FullCrewSheet(
+                            directors = m.directors,
+                            crew = m.crew.orEmpty(),
+                            detailTokens = adaptive.tokens.movieDetail,
+                            navigator = navigator,
+                            onDismiss = { showFullCrewSheet = false }
+                        )
+                    }
+                }
+            }
+
         }
     }
 
@@ -186,45 +228,91 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         movie: Movie,
         logs: List<MovieLog>,
         isEnriching: Boolean,
-        paddingValues: PaddingValues
+        scaffoldTokens: AdaptiveScaffoldTokens,
+        detailTokens: MovieDetailTokens,
+        navigator: Navigator,
+        onShowFullCrew: () -> Unit
     ) {
+        val contentModifier = Modifier
+            .fillMaxSize()
+            .widthIn(max = scaffoldTokens.maxCenteredContentWidth)
+
         val colors = MaterialTheme.colorScheme
-        LazyColumn(
+
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(colors.background.copy(0.15f)),
-            contentPadding = PaddingValues(
-                bottom = paddingValues.calculateBottomPadding() + 40.dp
-            )
+                .background(colors.background.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.TopCenter
         ) {
-            item { MovieBackdropSection(movie) }
-            item {
-                MovieHeroSection(
-                    movie,
-                    isEnriching
+
+            if (detailTokens.useTwoPaneLayout) {
+                MovieDetailExpandedContent(
+                    movie = movie,
+                    logs = logs,
+                    isEnriching = isEnriching,
+                    scaffoldTokens = scaffoldTokens,
+                    detailTokens = detailTokens,
+                    modifier = contentModifier,
+                    navigator = navigator,
+                    onShowFullCrew = onShowFullCrew
+                )
+            } else {
+                MovieDetailCompactContent(
+                    movie = movie,
+                    logs = logs,
+                    isEnriching = isEnriching,
+                    scaffoldTokens = scaffoldTokens,
+                    detailTokens = detailTokens,
+                    modifier = contentModifier,
+                    navigator = navigator,
+                    onShowFullCrew = onShowFullCrew
                 )
             }
-            item { MovieOverviewSection(movie) }
+        }
+    }
+
+    @Composable
+    private fun MovieDetailCompactContent(
+        movie: Movie,
+        logs: List<MovieLog>,
+        isEnriching: Boolean,
+        scaffoldTokens: AdaptiveScaffoldTokens,
+        detailTokens: MovieDetailTokens,
+        modifier: Modifier = Modifier,
+        navigator: Navigator,
+        onShowFullCrew: () -> Unit
+    ) {
+        LazyColumn(
+            modifier = modifier,
+            contentPadding = PaddingValues(
+                bottom = scaffoldTokens.verticalPadding + 40.dp
+            )
+        ) {
+            item { MovieBackdropSection(movie, detailTokens) }
+            item { MovieHeroSection(movie, isEnriching, detailTokens, isTwoPane = false) }
+            item { MovieOverviewSection(movie, detailTokens) }
 
             if (!movie.userReview.isNullOrEmpty()) {
-                item { UserReviewSection(movie.userReview!!) }
+                item { UserReviewSection(movie.userReview!!, detailTokens) }
             }
 
             if (!movie.actors.isNullOrEmpty()) {
-                item { CastSection(movie.actors!!) }
+                item { CastSection(movie.actors!!, detailTokens, navigator) }
             }
-
 
             item {
                 CrewSection(
                     directors = movie.directors,
-                    crew = movie.crew.orEmpty()
+                    crew = movie.crew.orEmpty(),
+                    detailTokens = detailTokens,
+                    navigator = navigator,
+                    onShowFullCrew = onShowFullCrew
                 )
             }
 
-
             if (!movie.tmdbReviews.isNullOrEmpty()) {
-                item { CommunityReviewsSection(movie.tmdbReviews!!) }
+                item { CommunityReviewsSection(movie.tmdbReviews!!, detailTokens) }
             }
 
             if (
@@ -232,26 +320,114 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                 !movie.productionCountries.isNullOrEmpty() ||
                 !movie.studios.isNullOrEmpty()
             ) {
-                item { ProductionDetailsSection(movie) }
+                item { ProductionDetailsSection(movie, detailTokens) }
             }
 
             if (!movie.similarMovies.isNullOrEmpty()) {
-                item { SimilarMoviesSection(movie.similarMovies!!) }
+                item { SimilarMoviesSection(movie.similarMovies!!, detailTokens) }
             }
 
-            item { LogsSection(logs) }
+            item { LogsSection(logs, detailTokens) }
         }
     }
 
     @Composable
-    fun MovieBackdropSection(movie: Movie) {
+    private fun MovieDetailExpandedContent(
+        movie: Movie,
+        logs: List<MovieLog>,
+        isEnriching: Boolean,
+        scaffoldTokens: AdaptiveScaffoldTokens,
+        detailTokens: MovieDetailTokens,
+        modifier: Modifier = Modifier,
+        navigator: Navigator,
+        onShowFullCrew: () -> Unit
+    ) {
+        LazyColumn(
+            modifier = modifier,
+            contentPadding = PaddingValues(
+                start = scaffoldTokens.horizontalPadding,
+                end = scaffoldTokens.horizontalPadding,
+                bottom = scaffoldTokens.verticalPadding + 40.dp
+            )
+        ) {
+            item { MovieBackdropSection(movie, detailTokens) }
+
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .offset(y = (-56).dp),
+                    horizontalArrangement = Arrangement.spacedBy(detailTokens.paneSpacing),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(0.95f)
+                            .fillMaxWidth()
+                    ) {
+                        MovieHeroSection(movie, isEnriching, detailTokens, isTwoPane = true)
+                        MovieOverviewSection(movie, detailTokens)
+
+                        if (!movie.userReview.isNullOrEmpty()) {
+                            UserReviewSection(movie.userReview!!, detailTokens)
+                        }
+
+                        LogsSection(logs, detailTokens)
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .weight(1.05f)
+                            .fillMaxWidth()
+                    ) {
+                        if (!movie.actors.isNullOrEmpty()) {
+                            CastSection(movie.actors!!, detailTokens, navigator)
+                        }
+
+                        CrewSection(
+                            directors = movie.directors,
+                            crew = movie.crew.orEmpty(),
+                            detailTokens = detailTokens,
+                            navigator = navigator,
+                            onShowFullCrew = onShowFullCrew
+                        )
+
+                        if (!movie.tmdbReviews.isNullOrEmpty()) {
+                            CommunityReviewsSection(movie.tmdbReviews!!, detailTokens)
+                        }
+
+                        if (
+                            !movie.originalLanguage.isNullOrEmpty() ||
+                            !movie.productionCountries.isNullOrEmpty() ||
+                            !movie.studios.isNullOrEmpty()
+                        ) {
+                            ProductionDetailsSection(movie, detailTokens)
+                        }
+
+                        if (!movie.similarMovies.isNullOrEmpty()) {
+                            SimilarMoviesSection(movie.similarMovies!!, detailTokens)
+                        }
+                    }
+                }
+            }
+
+            item { Spacer(Modifier.height(1.dp)) }
+        }
+    }
+
+    @Composable
+    fun MovieBackdropSection(
+        movie: Movie,
+        detailTokens: MovieDetailTokens
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(250.dp)
+                .height(detailTokens.heroHeight)
         ) {
             val colors = MaterialTheme.colorScheme
             val backdropUrl = movie.backdropPath ?: movie.posterPath
+
             if (backdropUrl != null) {
                 AsyncImage(
                     model = "https://image.tmdb.org/t/p/w780$backdropUrl",
@@ -266,7 +442,7 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, colors.background.copy(0.15f)),
+                            colors = listOf(Color.Transparent, colors.background.copy(alpha = 0.15f)),
                             startY = 100f
                         )
                     )
@@ -278,20 +454,28 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
     @Composable
     fun MovieHeroSection(
         movie: Movie,
-        isEnriching: Boolean
+        isEnriching: Boolean,
+        detailTokens: MovieDetailTokens,
+        isTwoPane: Boolean
     ) {
         val colors = MaterialTheme.colorScheme
+        val horizontalPadding = if (isTwoPane) 0.dp else 16.dp
+        val verticalOffset = if (isTwoPane) 0.dp else (-40).dp
+        val topPadding = if (isTwoPane) 8.dp else 40.dp
+        val gap = if (isTwoPane) detailTokens.paneSpacing else 16.dp
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .offset(y = (-40).dp)
+                .padding(horizontal = horizontalPadding)
+                .offset(y = verticalOffset),
+            verticalAlignment = Alignment.Top
         ) {
             Box(
                 modifier = Modifier
-                    .width(100.dp)
+                    .width(detailTokens.posterWidth)
                     .aspectRatio(0.66f)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(colors.surfaceVariant)
             ) {
                 if (movie.posterPath != null) {
@@ -304,12 +488,17 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                 }
             }
 
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(gap))
 
-            Column(modifier = Modifier.padding(top = 40.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(top = topPadding)
+                    .weight(1f)
+            ) {
                 Text(
-                    movie.name,
+                    text = movie.name,
                     style = MaterialTheme.typography.headlineSmall.copy(
+                        fontSize = detailTokens.titleFontSize,
                         fontWeight = FontWeight.Bold,
                         color = colors.onBackground
                     )
@@ -320,7 +509,7 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                     Text(
                         "Original: ${movie.originalTitle}",
                         color = colors.onSurfaceVariant,
-                        fontSize = 13.sp
+                        fontSize = detailTokens.metaFontSize
                     )
                 }
 
@@ -329,7 +518,7 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                     Text(
                         "HU: ${movie.hungarianTitle}",
                         color = colors.onSurfaceVariant,
-                        fontSize = 13.sp
+                        fontSize = detailTokens.metaFontSize
                     )
                 }
 
@@ -337,8 +526,8 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         movie.collectionName!!,
-                        color = colors.scrim,
-                        fontSize = 12.sp
+                        color = colors.inversePrimary,
+                        fontSize = detailTokens.metaFontSize
                     )
                 }
 
@@ -348,12 +537,12 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    MetaTag(movie.year.toString())
-                    if (!movie.mpaaRating.isNullOrEmpty()) MetaTag(movie.mpaaRating!!)
+                    MetaTag(movie.year.toString(), detailTokens)
+                    if (!movie.mpaaRating.isNullOrEmpty()) MetaTag(movie.mpaaRating!!, detailTokens)
                     if (movie.runtimeMinutes != null) {
-                        MetaTag("${movie.runtimeMinutes} min")
+                        MetaTag("${movie.runtimeMinutes} min", detailTokens)
                     } else if (isEnriching) {
-                        MetaTag("...")
+                        MetaTag("...", detailTokens)
                     }
                 }
             }
@@ -362,37 +551,48 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
 
     @OptIn(ExperimentalLayoutApi::class)
     @Composable
-    private fun MovieOverviewSection(movie: Movie) {
+    private fun MovieOverviewSection(
+        movie: Movie,
+        detailTokens: MovieDetailTokens
+    ) {
         val colors = MaterialTheme.colorScheme
 
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(colors.onBackground.copy(alpha = 0.05f))
                     .padding(12.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                RatingCol("YOU", movie.rating?.toString() ?: "-", colors.scrim, Icons.Default.Star)
+                RatingCol(
+                    "YOU",
+                    movie.rating?.toString() ?: "-",
+                    colors.inversePrimary,
+                    Icons.Default.Star,
+                    detailTokens
+                )
                 DividerCol()
 
                 val tmdbScore = movie.tmdbVoteAverage?.let { round(it * 10.0).toString() } ?: "-"
-                RatingCol("TMDB", tmdbScore, colors.primary, Icons.Default.Percent)
+                RatingCol("TMDB", tmdbScore, colors.primary, Icons.Default.Percent, detailTokens)
 
                 if (movie.revenue != null && movie.revenue!! > 0) {
                     DividerCol()
-                    FinanceCol(movie.revenue!!)
+                    FinanceCol(movie.revenue!!, detailTokens)
                 }
             }
+
+            Spacer(Modifier.height(12.dp))
+
             if (!movie.tagline.isNullOrEmpty()) {
                 Text(
                     movie.tagline!!,
                     fontStyle = FontStyle.Italic,
                     color = Color.Gray,
-                    fontSize = 16.sp
+                    fontSize = detailTokens.bodyFontSize
                 )
                 Spacer(Modifier.height(12.dp))
             }
@@ -400,8 +600,8 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
             Text(
                 movie.overview ?: "No description available.",
                 color = colors.onBackground.copy(alpha = 0.7f),
-                lineHeight = 22.sp,
-                fontSize = 15.sp
+                fontSize = detailTokens.bodyFontSize,
+                lineHeight = detailTokens.bodyFontSize * 1.45f
             )
 
             Spacer(Modifier.height(16.dp))
@@ -417,46 +617,69 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                                 .background(colors.surfaceVariant, RoundedCornerShape(16.dp))
                                 .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
-                            Text(genre, color = colors.onBackground, fontSize = 11.sp)
+                            Text(
+                                genre,
+                                color = colors.onBackground,
+                                fontSize = detailTokens.metaFontSize
+                            )
                         }
                     }
                 }
-
-                Spacer(Modifier.height(24.dp))
             }
-        }
-    }
 
-    @Composable
-    fun UserReviewSection(review: String) {
-        val colors = MaterialTheme.colorScheme
-        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-            Box(
-                modifier = Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(colors.background.copy(blue = 0.3f))
-                    .border(1.dp, colors.onBackground.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                    .padding(16.dp)
-            ) {
-                Column {
-                    Text(
-                        "YOUR REVIEW", color = colors.scrim,
-                        fontWeight = FontWeight.Bold, fontSize = 12.sp
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        review, color = colors.onBackground,
-                        fontSize = 14.sp, lineHeight = 20.sp
-                    )
-                }
-            }
             Spacer(Modifier.height(24.dp))
         }
     }
 
     @Composable
-    fun CastSection(cast: List<Person>) {
+    fun UserReviewSection(
+        review: String,
+        detailTokens: MovieDetailTokens
+    ) {
         val colors = MaterialTheme.colorScheme
+
+        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(colors.background.copy(blue = 0.3f))
+                    .border(
+                        1.dp,
+                        colors.onBackground.copy(alpha = 0.1f),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .padding(16.dp)
+            ) {
+                Column {
+                    Text(
+                        text = "YOUR REVIEW",
+                        color = colors.inversePrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = detailTokens.metaFontSize
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = review,
+                        color = colors.onBackground,
+                        fontSize = detailTokens.bodyFontSize,
+                        lineHeight = detailTokens.bodyFontSize * 1.4f
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+
+    @Composable
+    fun CastSection(
+        cast: List<Person>,
+        detailTokens: MovieDetailTokens,
+        navigator: Navigator
+    ) {
+        val colors = MaterialTheme.colorScheme
+
         HorizontalDivider(
             color = colors.onBackground.copy(alpha = 0.1f),
             modifier = Modifier.padding(horizontal = 16.dp)
@@ -464,43 +687,64 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         Spacer(Modifier.height(16.dp))
         SectionTitle("Cast", paddingHorizontal = 16.dp)
         Spacer(Modifier.height(12.dp))
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(cast) { actor -> CastMemberCard(actor) }
+
+        HorizontalRow(items = cast) { actor ->
+            CastMemberCard(
+                person = actor,
+                detailTokens = detailTokens,
+                navigator = navigator
+            )
         }
         Spacer(Modifier.height(24.dp))
-
-
     }
 
     @Composable
-    fun CrewSection(directors: List<Person>, crew: List<Person>) {
+    fun CrewSection(
+        directors: List<Person>,
+        crew: List<Person>,
+        detailTokens: MovieDetailTokens,
+        navigator: Navigator,
+        onShowFullCrew: () -> Unit
+    ) {
         val colors = MaterialTheme.colorScheme
-        if (directors.isNotEmpty()) {
 
+        if (directors.isNotEmpty()) {
             HorizontalDivider(
                 color = colors.onBackground.copy(alpha = 0.1f),
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
             Spacer(Modifier.height(16.dp))
-            DirectorRow(directors)
+            DirectorRow(
+                directors = directors,
+                detailTokens = detailTokens,
+                navigator = navigator
+            )
             Spacer(Modifier.height(16.dp))
-
         }
-        if (crew.isEmpty()) {
 
+        if (crew.isNotEmpty()) {
             Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                KeyCrewRow("Screenplay", listOf("Screenplay", "Writer", "Story"), crew)
-                KeyCrewRow("Cinematography", listOf("Director of Photography"), crew)
+                KeyCrewRow(
+                    label = "Screenplay",
+                    jobs = listOf("Screenplay", "Writer", "Story"),
+                    crew = crew,
+                    detailTokens = detailTokens
+                )
+                KeyCrewRow(
+                    label = "Cinematography",
+                    jobs = listOf("Director of Photography"),
+                    crew = crew,
+                    detailTokens = detailTokens
+                )
             }
 
-
-            Center {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center
+            ) {
                 OutlinedButton(
-                    onClick = { /* TODO: navigate to FullCrewScreen */ },
-                    border = ButtonDefaults.outlinedButtonBorder.copy(
+                    onClick = onShowFullCrew,
+                    border = ButtonDefaults.outlinedButtonBorder(enabled = true).copy(
                         brush = Brush.horizontalGradient(
                             listOf(
                                 colors.onBackground.copy(alpha = 0.3f),
@@ -511,21 +755,31 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                     modifier = Modifier.padding(vertical = 8.dp)
                 ) {
                     Icon(
-                        Icons.Default.People, contentDescription = null,
-                        tint = colors.scrim, modifier = Modifier.size(18.dp)
+                        Icons.Default.People,
+                        contentDescription = null,
+                        tint = colors.inversePrimary,
+                        modifier = Modifier.size(18.dp)
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("See Full Crew", color = colors.onBackground)
+                    Text(
+                        text = "See Full Crew",
+                        color = colors.onBackground,
+                        fontSize = detailTokens.metaFontSize
+                    )
                 }
-
-                Spacer(Modifier.height(16.dp))
             }
+
+            Spacer(Modifier.height(16.dp))
         }
     }
 
     @Composable
-    fun CommunityReviewsSection(reviews: List<String>) {
+    fun CommunityReviewsSection(
+        reviews: List<String>,
+        detailTokens: MovieDetailTokens
+    ) {
         val colors = MaterialTheme.colorScheme
+
         HorizontalDivider(
             color = colors.onBackground.copy(alpha = 0.1f),
             modifier = Modifier.padding(horizontal = 16.dp)
@@ -533,50 +787,75 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         Spacer(Modifier.height(16.dp))
         SectionTitle("Community Reviews", paddingHorizontal = 16.dp)
         Spacer(Modifier.height(12.dp))
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(reviews) { reviewRaw -> ReviewCard(reviewRaw) }
+
+        HorizontalRow(items = reviews) { reviewRaw ->
+            ReviewCard(
+                reviewRaw = reviewRaw,
+                detailTokens = detailTokens
+            )
         }
+
         Spacer(Modifier.height(24.dp))
-
-
     }
 
+    @OptIn(ExperimentalLayoutApi::class)
     @Composable
-    fun ProductionDetailsSection(movie: Movie) {
+    fun ProductionDetailsSection(
+        movie: Movie,
+        detailTokens: MovieDetailTokens
+    ) {
         val colors = MaterialTheme.colorScheme
+
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
             SectionTitle("Production Details")
             Spacer(Modifier.height(8.dp))
-            @OptIn(ExperimentalLayoutApi::class)
+
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 val language = movie.originalLanguage
-                if (language.isNullOrEmpty())
-                    DetailItem("Language", language?.uppercase() ?: "")
+                if (!language.isNullOrEmpty()) {
+                    DetailItem(
+                        label = "Language",
+                        value = languageDisplayName(language),
+                        detailTokens = detailTokens
+                    )
+                }
+
                 val prodCountry = movie.productionCountries
-                if (prodCountry.isNullOrEmpty())
-                    DetailItem("Country", prodCountry?.take(2)?.joinToString(", ") ?: "")
+                if (!prodCountry.isNullOrEmpty()) {
+                    DetailItem(
+                        label = "Country",
+                        value = prodCountry.take(2).joinToString(", "),
+                        detailTokens = detailTokens
+                    )
+                }
+
                 val studios = movie.studios
-                if (studios.isNullOrEmpty())
-                    DetailItem("Studio", studios?.first() ?: "")
+                if (!studios.isNullOrEmpty()) {
+                    DetailItem(
+                        label = "Studio",
+                        value = studios.first(),
+                        detailTokens = detailTokens
+                    )
+                }
             }
+
             HorizontalDivider(
                 color = colors.onBackground.copy(alpha = 0.1f),
                 modifier = Modifier.padding(vertical = 16.dp)
             )
         }
-
     }
 
-
     @Composable
-    private fun SimilarMoviesSection(movies: List<SimilarMovie>) {
+    private fun SimilarMoviesSection(
+        movies: List<SimilarMovie>,
+        detailTokens: MovieDetailTokens
+    ) {
         val colors = MaterialTheme.colorScheme
+
         HorizontalDivider(
             color = colors.onBackground.copy(alpha = 0.1f),
             modifier = Modifier.padding(horizontal = 16.dp)
@@ -584,23 +863,25 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         Spacer(Modifier.height(16.dp))
         SectionTitle("You Might Also Like", paddingHorizontal = 16.dp)
         Spacer(Modifier.height(12.dp))
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(movies) { similar -> SimilarMovieCard(similar) }
+
+        HorizontalRow(items = movies) { similar ->
+            SimilarMovieCard(
+                similar = similar,
+                detailTokens = detailTokens
+            )
         }
+
         Spacer(Modifier.height(24.dp))
-
-
     }
 
-
     @Composable
-    private fun LogsSection(logs: List<MovieLog>) {
+    private fun LogsSection(
+        logs: List<MovieLog>,
+        detailTokens: MovieDetailTokens
+    ) {
         val colors = MaterialTheme.colorScheme
-        Column {
 
+        Column {
             HorizontalDivider(
                 color = colors.onBackground.copy(alpha = 0.1f),
                 modifier = Modifier.padding(horizontal = 16.dp)
@@ -609,12 +890,11 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
             SectionTitle("Your Logs", paddingHorizontal = 16.dp)
             Spacer(Modifier.height(8.dp))
 
-
             if (logs.isEmpty()) {
                 Text(
-                    "No logs yet.",
+                    text = "No logs yet.",
                     color = colors.onSurfaceVariant,
-                    fontSize = 13.sp,
+                    fontSize = detailTokens.metaFontSize,
                     modifier = Modifier.padding(horizontal = 16.dp)
                 )
             } else {
@@ -622,9 +902,10 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                     ListItem(
                         headlineContent = {
                             Text(
-                                log.watchedDate ?: "Added to Watchlist",
+                                text = log.watchedDate ?: "Added to Watchlist",
                                 fontWeight = FontWeight.Bold,
-                                color = colors.onBackground
+                                color = colors.onBackground,
+                                fontSize = detailTokens.bodyFontSize
                             )
                         },
                         supportingContent = {
@@ -633,18 +914,24 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                                     Icon(
                                         Icons.Default.Star,
                                         contentDescription = null,
-                                        tint = colors.scrim,
+                                        tint = colors.inversePrimary,
                                         modifier = Modifier.size(12.dp)
                                     )
-                                    Text(" ${log.rating}", color = colors.onBackground, fontSize = 12.sp)
+                                    Text(
+                                        text = " ${log.rating}",
+                                        color = colors.onBackground,
+                                        fontSize = detailTokens.metaFontSize
+                                    )
                                 }
                             }
                         },
                         leadingContent = {
                             Icon(
-                                if (log.isRewatch) Icons.Default.Replay
-                                else if (log.watchedDate == null) Icons.Default.Bookmark
-                                else Icons.Default.Visibility,
+                                imageVector = when {
+                                    log.isRewatch -> Icons.Default.Replay
+                                    log.watchedDate == null -> Icons.Default.Bookmark
+                                    else -> Icons.Default.Visibility
+                                },
                                 contentDescription = null,
                                 tint = colors.onSurfaceVariant
                             )
@@ -655,53 +942,57 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         }
     }
 
-    @Composable
-    private fun MetaTag(text: String) {
-        val colors = MaterialTheme.colorScheme
-
-        Box(
-            modifier = Modifier
-                .border(1.dp, colors.onBackground.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-        ) { Text(text, color = colors.onBackground, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
-    }
 
     @Composable
-    private fun SectionTitle(title: String, paddingHorizontal: androidx.compose.ui.unit.Dp = 0.dp) {
-        val colors = MaterialTheme.colorScheme
-
-        Text(
-            title,
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.Bold, color = colors.onBackground.copy(alpha = 0.7f), letterSpacing = 1.sp
-            ),
-            modifier = Modifier.padding(horizontal = paddingHorizontal)
-        )
-    }
-
-    @Composable
-    private fun DetailItem(label: String, value: String) {
+    private fun DetailItem(
+        label: String,
+        value: String,
+        detailTokens: MovieDetailTokens
+    ) {
         val colors = MaterialTheme.colorScheme
 
         Column {
-            Text(label.uppercase(), fontSize = 10.sp, color = colors.onSurfaceVariant, fontWeight = FontWeight.Bold)
+            Text(
+                text = label.uppercase(),
+                fontSize = detailTokens.metaFontSize,
+                color = colors.onSurfaceVariant,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(Modifier.height(2.dp))
-            Text(value, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = colors.onBackground)
+            Text(
+                text = value,
+                fontSize = detailTokens.bodyFontSize,
+                fontWeight = FontWeight.Medium,
+                color = colors.onBackground
+            )
         }
     }
 
     @Composable
     private fun RatingCol(
-        label: String, value: String, color: Color,
-        icon: androidx.compose.ui.graphics.vector.ImageVector
+        label: String,
+        value: String,
+        color: Color,
+        icon: ImageVector,
+        detailTokens: MovieDetailTokens
     ) {
         val colors = MaterialTheme.colorScheme
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(label, fontSize = 10.sp, color = colors.onSurfaceVariant, fontWeight = FontWeight.Bold)
+            Text(
+                text = label,
+                fontSize = detailTokens.metaFontSize,
+                color = colors.onSurfaceVariant,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = colors.onBackground)
+                Text(
+                    text = value,
+                    fontSize = (detailTokens.bodyFontSize.value + 2f).sp,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onBackground
+                )
                 Spacer(Modifier.width(4.dp))
                 Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
             }
@@ -709,13 +1000,22 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
     }
 
     @Composable
-    private fun FinanceCol(amount: Long) {
-        val txt = revenueFormater(amount)
+    private fun FinanceCol(amount: Long, detailTokens: MovieDetailTokens) {
         val colors = MaterialTheme.colorScheme
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("BOX OFFICE", fontSize = 10.sp, color = colors.onSurfaceVariant, fontWeight = FontWeight.Bold)
+            Text(
+                text = "BOX OFFICE",
+                fontSize = detailTokens.metaFontSize,
+                color = colors.onSurfaceVariant,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(Modifier.height(4.dp))
-            Text(txt, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = colors.scrim)
+            Text(
+                text = revenueFormater(amount),
+                fontSize = detailTokens.bodyFontSize,
+                fontWeight = FontWeight.Bold,
+                color = colors.inversePrimary
+            )
         }
     }
 
@@ -727,83 +1027,143 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
     }
 
     @Composable
-    private fun Center(content: @Composable () -> Unit) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { content() }
-    }
-
-    @Composable
-    private fun CastMemberCard(person: Person) {
+    private fun CastMemberCard(
+        person: Person,
+        detailTokens: MovieDetailTokens,
+        navigator: Navigator
+    ) {
         val colors = MaterialTheme.colorScheme
+        val avatarSize = if (detailTokens.useTwoPaneLayout) 82.dp else 70.dp
+        val cardWidth = if (detailTokens.useTwoPaneLayout) 104.dp else 90.dp
 
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.width(90.dp).clickable { }
+            modifier = Modifier
+                .width(cardWidth)
+                .clickable {
+                    openPersonCollection(
+                        navigator = navigator,
+                        personName = person.name,
+                        entityType = StatEntityType.ACTORS
+                    )
+                }
         ) {
-            Box(modifier = Modifier.size(70.dp).clip(CircleShape).background(colors.surfaceVariant)) {
+            Box(
+                modifier = Modifier
+                    .size(avatarSize)
+                    .clip(CircleShape)
+                    .background(colors.surfaceVariant)
+            ) {
                 if (person.profilePath != null) {
                     AsyncImage(
                         model = "https://image.tmdb.org/t/p/w200${person.profilePath}",
-                        contentDescription = person.name, contentScale = ContentScale.Crop,
+                        contentDescription = person.name,
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
                     Icon(
-                        Icons.Default.Person, contentDescription = null,
-                        tint = colors.onBackground.copy(alpha = 0.5f), modifier = Modifier.align(Alignment.Center)
+                        Icons.Default.Person,
+                        contentDescription = null,
+                        tint = colors.onBackground.copy(alpha = 0.5f),
+                        modifier = Modifier.align(Alignment.Center)
                     )
                 }
             }
+
             Spacer(Modifier.height(8.dp))
+
             Text(
-                person.name ?: "Unknown", color = colors.onBackground, fontSize = 11.sp,
-                fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                maxLines = 2, overflow = TextOverflow.Ellipsis
+                text = person.name ?: "Unknown",
+                color = colors.onBackground,
+                fontSize = detailTokens.metaFontSize,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
+
             if (!person.character.isNullOrEmpty()) {
                 Text(
-                    person.character, color = colors.onSurfaceVariant, fontSize = 10.sp,
-                    textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis
+                    text = person.character,
+                    color = colors.onSurfaceVariant,
+                    fontSize = detailTokens.metaFontSize,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
     }
 
     @Composable
-    private fun DirectorRow(directors: List<Person>) {
+    private fun DirectorRow(
+        directors: List<Person>,
+        detailTokens: MovieDetailTokens,
+        navigator: Navigator
+    ) {
         val colors = MaterialTheme.colorScheme
+        val avatarSize = if (detailTokens.useTwoPaneLayout) 58.dp else 50.dp
+        val labelWidth = if (detailTokens.useTwoPaneLayout) 120.dp else 100.dp
 
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "Directed by:", color = colors.onBackground, fontSize = 16.sp,
-                fontWeight = FontWeight.Bold, modifier = Modifier.width(100.dp)
+                text = "Directed by:",
+                color = colors.onBackground,
+                fontSize = detailTokens.bodyFontSize,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.width(labelWidth)
             )
+
             LazyRow(
                 modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.End, reverseLayout = true
+                horizontalArrangement = Arrangement.End,
+                reverseLayout = true
             ) {
                 items(directors) { director ->
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(start = 16.dp).clickable { }) {
+                        modifier = Modifier
+                            .padding(start = 16.dp)
+                            .clickable {
+                                openPersonCollection(
+                                    navigator = navigator,
+                                    personName = director.name,
+                                    entityType = StatEntityType.DIRECTORS
+                                )
+                            }
+                    ) {
                         Box(
-                            modifier = Modifier.size(50.dp).clip(CircleShape)
-                                .border(2.dp, colors.onBackground, CircleShape).background(colors.surfaceVariant)
+                            modifier = Modifier
+                                .size(avatarSize)
+                                .clip(CircleShape)
+                                .border(2.dp, colors.onBackground, CircleShape)
+                                .background(colors.surfaceVariant)
                         ) {
                             if (director.profilePath != null) {
                                 AsyncImage(
                                     model = "https://image.tmdb.org/t/p/w200${director.profilePath}",
-                                    contentDescription = director.name, contentScale = ContentScale.Crop,
+                                    contentDescription = director.name,
+                                    contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
                         }
+
                         Spacer(Modifier.height(4.dp))
+
                         Text(
-                            director.name ?: "", color = colors.onBackground, fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis
+                            text = director.name ?: "",
+                            color = colors.onBackground,
+                            fontSize = detailTokens.metaFontSize,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -812,123 +1172,200 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
     }
 
     @Composable
-    private fun KeyCrewRow(label: String, jobs: List<String>, crew: List<Person>) {
+    private fun KeyCrewRow(
+        label: String,
+        jobs: List<String>,
+        crew: List<Person>,
+        detailTokens: MovieDetailTokens
+    ) {
         val colors = MaterialTheme.colorScheme
-
         val matches = crew.filter { it.job in jobs }
         if (matches.isEmpty()) return
+
         val names = matches.mapNotNull { it.name }.toSet().joinToString(", ")
+
         Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
             verticalAlignment = Alignment.Top
         ) {
             Text(
-                label, color = colors.onSurfaceVariant, fontSize = 13.sp,
-                fontWeight = FontWeight.Bold, modifier = Modifier.width(110.dp)
+                text = label,
+                color = colors.onSurfaceVariant,
+                fontSize = detailTokens.metaFontSize,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.width(110.dp)
             )
             Text(
-                names, color = colors.onBackground, fontSize = 13.sp,
-                modifier = Modifier.weight(1f), lineHeight = 18.sp
+                text = names,
+                color = colors.onBackground,
+                fontSize = detailTokens.bodyFontSize,
+                modifier = Modifier.weight(1f),
+                lineHeight = detailTokens.bodyFontSize * 1.35f
             )
         }
     }
 
+
     @Composable
-    private fun ReviewCard(reviewRaw: String) {
+    private fun ReviewCard(
+        reviewRaw: String,
+        detailTokens: MovieDetailTokens
+    ) {
         val splitIndex = reviewRaw.indexOf(": ")
         val author = if (splitIndex != -1) reviewRaw.substring(0, splitIndex) else "Unknown"
         val content = if (splitIndex != -1) reviewRaw.substring(splitIndex + 2) else reviewRaw
         val colors = MaterialTheme.colorScheme
         var showDialog by remember { mutableStateOf(false) }
+
         if (showDialog) {
             AlertDialog(
-                onDismissRequest = { showDialog = false },
+                onDismissRequest = { },
                 containerColor = Color(0xFF2c3440),
                 title = { Text(author, color = colors.onBackground) },
                 text = {
-                    Text(content, color = colors.onBackground.copy(alpha = 0.7f), lineHeight = 21.sp)
+                    Text(
+                        text = content,
+                        color = colors.onBackground.copy(alpha = 0.7f),
+                        lineHeight = detailTokens.bodyFontSize * 1.4f,
+                        fontSize = detailTokens.bodyFontSize
+                    )
                 },
                 confirmButton = {
-                    TextButton(onClick = { showDialog = false }) {
+                    TextButton(onClick = { }) {
                         Text("Close", color = colors.primary)
                     }
                 }
             )
         }
 
+        val cardWidth = if (detailTokens.useTwoPaneLayout) 320.dp else 280.dp
+        val cardHeight = if (detailTokens.useTwoPaneLayout) 180.dp else 160.dp
+
         Box(
-            modifier = Modifier.width(280.dp).height(160.dp)
+            modifier = Modifier
+                .width(cardWidth)
+                .height(cardHeight)
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color(0xFF202020))
                 .border(1.dp, colors.onBackground.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                .clickable { showDialog = true }
+                .clickable {}
                 .padding(16.dp)
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
-                        modifier = Modifier.size(24.dp).clip(CircleShape).background(colors.primary),
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(colors.primary),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Default.Person, contentDescription = null,
-                            tint = colors.background, modifier = Modifier.size(16.dp)
+                            Icons.Default.Person,
+                            contentDescription = null,
+                            tint = colors.background,
+                            modifier = Modifier.size(16.dp)
                         )
                     }
+
                     Spacer(Modifier.width(8.dp))
+
                     Text(
-                        author, fontWeight = FontWeight.Bold, fontSize = 14.sp,
-                        color = colors.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        text = author,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = detailTokens.bodyFontSize,
+                        color = colors.onBackground,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
                 }
+
                 HorizontalDivider(
                     color = colors.onBackground.copy(alpha = 0.1f),
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
+
                 Text(
-                    content, color = colors.onBackground.copy(alpha = 0.7f), fontSize = 13.sp,
-                    lineHeight = 18.sp, maxLines = 4, overflow = TextOverflow.Ellipsis,
+                    text = content,
+                    color = colors.onBackground.copy(alpha = 0.7f),
+                    fontSize = detailTokens.metaFontSize,
+                    lineHeight = detailTokens.metaFontSize * 1.4f,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
+
                 Spacer(Modifier.height(4.dp))
+
                 Text(
-                    "Read Full Review", color = colors.primary,
-                    fontSize = 12.sp, fontWeight = FontWeight.Bold
+                    text = "Read Full Review",
+                    color = colors.primary,
+                    fontSize = detailTokens.metaFontSize,
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
     }
 
     @Composable
-    private fun SimilarMovieCard(similar: SimilarMovie) {
+    private fun SimilarMovieCard(
+        similar: SimilarMovie,
+        detailTokens: MovieDetailTokens
+    ) {
         val colors = MaterialTheme.colorScheme
-        Column(modifier = Modifier.width(100.dp).clickable { /* TODO: navigate */ }) {
+        val cardWidth = if (detailTokens.useTwoPaneLayout) 120.dp else 100.dp
+        val posterHeight = if (detailTokens.useTwoPaneLayout) 180.dp else 150.dp
+
+        Column(
+            modifier = Modifier
+                .width(cardWidth)
+                .clickable { }
+        ) {
             Box(
-                modifier = Modifier.fillMaxWidth().height(150.dp)
-                    .clip(RoundedCornerShape(8.dp)).background(colors.surfaceVariant)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(posterHeight)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.surfaceVariant)
             ) {
                 if (similar.posterPath != null) {
                     AsyncImage(
                         model = "https://image.tmdb.org/t/p/w200${similar.posterPath}",
-                        contentDescription = similar.name, contentScale = ContentScale.Crop,
+                        contentDescription = similar.name,
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
                     Icon(
-                        Icons.Default.Movie, contentDescription = null,
-                        tint = colors.onSurfaceVariant, modifier = Modifier.align(Alignment.Center)
+                        Icons.Default.Movie,
+                        contentDescription = null,
+                        tint = colors.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.Center)
                     )
                 }
             }
+
             Spacer(Modifier.height(6.dp))
+
             Text(
-                similar.name ?: "", color = colors.onBackground, fontSize = 11.sp,
-                fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                lineHeight = 14.sp
+                text = similar.name ?: "",
+                color = colors.onBackground,
+                fontSize = detailTokens.metaFontSize,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = detailTokens.metaFontSize * 1.2f
             )
+
             if (similar.year != null) {
-                Text("${similar.year}", color = colors.onSurfaceVariant, fontSize = 10.sp)
+                Text(
+                    text = "${similar.year}",
+                    color = colors.onSurfaceVariant,
+                    fontSize = detailTokens.metaFontSize
+                )
             }
         }
     }

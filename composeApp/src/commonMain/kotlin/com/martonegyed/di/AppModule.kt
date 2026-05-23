@@ -4,10 +4,18 @@ import com.martonegyed.data.local.DataSyncManager
 import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.data.local.CsvImportService
 import com.martonegyed.data.remote.TmdbApiService
+import com.martonegyed.presentation.analytics.AnalyticsRepository
+import com.martonegyed.presentation.screens.collabSearch.CollabSearchScreenModel
+import com.martonegyed.presentation.screens.calendar.CalendarScreenModel
 import com.martonegyed.presentation.screens.details.MovieDetailScreenModel
 import com.martonegyed.presentation.screens.import.ImportScreenModel
+import com.martonegyed.presentation.screens.insights.InsightsScreenModel
+import com.martonegyed.presentation.screens.moviePicker.MoviePickerResultsScreenModel
+import com.martonegyed.presentation.screens.moviePicker.MoviePickerScreenModel
 import com.martonegyed.presentation.screens.movies.MovieCollectionScreenModel
+import com.martonegyed.presentation.screens.randompicker.RandomPickerScreenModel
 import com.martonegyed.presentation.screens.statistics.StatisticsScreenModel
+import com.martonegyed.presentation.screens.yearinreview.YearInReviewScreenModel
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.serialization.kotlinx.json.json
@@ -32,10 +40,18 @@ val appModule = module {
     single { CsvImportService() }
     single { TmdbApiService(get()) }
     single { DataSyncManager(get(), get()) }
+    single { AnalyticsRepository(get()) }
 
 
     factory { ImportScreenModel(get(), get(), get(), get()) }
     factory { MovieCollectionScreenModel(get()) }
     factory { MovieDetailScreenModel(get(), get()) }
     factory { StatisticsScreenModel(get()) }
+    factory { InsightsScreenModel(get()) }
+    factory { CalendarScreenModel(get()) }
+    factory { CollabSearchScreenModel(get(), get()) }
+    factory { YearInReviewScreenModel(get()) }
+    factory { RandomPickerScreenModel(get()) }
+    factory { MoviePickerScreenModel(get(), get()) }
+    factory { MoviePickerResultsScreenModel(get(), get(), get()) }
 }

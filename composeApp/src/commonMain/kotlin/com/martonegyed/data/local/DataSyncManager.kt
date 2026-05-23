@@ -38,9 +38,13 @@ class DataSyncManager(
 
     val resumePromptShown = MutableStateFlow(false)
 
+
+
     fun startImportAndEnrich(stagedMovies: List<Map<String, Any?>>) {
 
-        if (phase.value != Phase.IDLE) return
+        if (phase.value != Phase.IDLE) {
+            return
+        }
 
         scope.launch {
             try {
@@ -49,7 +53,9 @@ class DataSyncManager(
                 importedCount.value = 0
                 lastMessage.value = $$"Importing ${stagedMovies.size} movies..."
 
+
                 database.movieEntityQueries.transaction {
+
                     for (staged in stagedMovies) {
                         importSingleMovie(staged)
                         importedCount.value += 1
@@ -77,21 +83,40 @@ class DataSyncManager(
         val year = (staged["year"] as? Int)?.toLong() ?: 0L
         val uri = staged["letterboxdUri"]?.toString()
         val imdb = staged["imdbId"]?.toString()
+        val addedDate = staged["addedDate"]?.toString()
 
         val explicitWatched = staged["isWatched"] == true
         val inWatchlist = if (staged["inWatchlist"] == true) 1L else 0L
-        val logs = staged["logs"] as? List<Map<String, Any?>> ?: emptyList()
+
+        val directLog = mutableMapOf<String, Any?>().apply {
+            staged["watchedDate"]?.let { put("watchedDate", it) }
+            staged["loggedDate"]?.let { put("loggedDate", it) }
+            staged["rating"]?.let { put("rating", it) }
+            staged["userReview"]?.let { put("userReview", it) }
+            staged["sourceType"]?.let { put("sourceType", it) }
+            staged["isRewatch"]?.let { put("isRewatch", it) }
+        }
+
+        val logs = when {
+            staged["logs"] is List<*> -> staged["logs"] as List<Map<String, Any?>>
+            directLog.isNotEmpty() -> listOf(directLog)
+            else -> emptyList()
+        }
 
         val hasAnyLog = logs.any {
-            (it["rating"] as? Double)?.let { r -> r > 0.0 } == true ||
-                    !it["watchedDate"]?.toString().isNullOrEmpty() ||
-                    !it["userReview"]?.toString().isNullOrEmpty()
+            !it["watchedDate"]?.toString().isNullOrBlank() ||
+                    !it["loggedDate"]?.toString().isNullOrBlank() ||
+                    (it["rating"] as? Double) != null ||
+                    !it["userReview"]?.toString().isNullOrBlank()
         }
 
         val isWatchedFlag = if (explicitWatched || hasAnyLog) 1L else 0L
 
         val existingMovie = database.movieEntityQueries.getMovieByUniqueData(
-            uri = uri, imdb = imdb, name = name, year = year
+            uri = uri,
+            imdb = imdb,
+            name = name,
+            year = year
         ).executeAsOneOrNull()
 
         val movieId: Long = if (existingMovie != null) {
@@ -103,6 +128,14 @@ class DataSyncManager(
                 inWatchlist = mergedWatchlist,
                 id = existingMovie.id
             )
+
+            if (!addedDate.isNullOrBlank() && existingMovie.addedDate == null) {
+                database.movieEntityQueries.updateMovieAddedDate(
+                    addedDate = addedDate,
+                    id = existingMovie.id
+                )
+            }
+
             existingMovie.id
         } else {
             database.movieEntityQueries.insertMovie(
@@ -131,7 +164,7 @@ class DataSyncManager(
                 collectionName = null,
                 trailerKey = null,
                 mpaaRating = null,
-                addedDate = null,
+                addedDate = addedDate,
                 studios = null,
                 productionCountries = null,
                 spokenLanguages = null,
@@ -141,6 +174,51 @@ class DataSyncManager(
             database.movieEntityQueries.getLastInsertId().executeAsOne()
         }
 
+        for (rawLog in logs) {
+            val sourceType = rawLog["sourceType"]?.toString()?.ifBlank { null } ?: "UNKNOWN"
+            var watchedDate = rawLog["watchedDate"]?.toString()?.ifBlank { null }
+            val loggedDate = rawLog["loggedDate"]?.toString()?.ifBlank { null }
+            val rating = rawLog["rating"] as? Double
+            val review = rawLog["userReview"]?.toString()?.ifBlank { null }
+
+            if (watchedDate == null && sourceType in listOf("DIARY", "REVIEWS")) {
+                watchedDate = loggedDate
+            }
+
+            if (watchedDate == null && loggedDate == null && rating == null && review == null) {
+                continue
+            }
+            val existingLog = database.movieEntityQueries.getLogByMovieAndSource(
+                movieId = movieId,
+                sourceType = sourceType,
+                watchedDate = watchedDate,
+                loggedDate = loggedDate
+            ).executeAsOneOrNull()
+
+            if (existingLog != null) {
+                database.movieEntityQueries.updateMovieLog(
+                    watchedDate = watchedDate ?: existingLog.watchedDate,
+                    loggedDate = loggedDate ?: existingLog.loggedDate,
+                    rating = rating ?: existingLog.rating,
+                    review = review ?: existingLog.review,
+                    isRewatch = existingLog.isRewatch,
+                    sourceType = sourceType,
+                    id = existingLog.id
+                )
+            } else {
+                database.movieEntityQueries.insertMovieLog(
+                    movieId = movieId,
+                    watchedDate = watchedDate,
+                    loggedDate = loggedDate,
+                    rating = rating,
+                    review = review,
+                    isRewatch = 0L,
+                    sourceType = sourceType
+                )
+            }
+        }
+        recomputeRewatchFlags(movieId)
+        /*
         val mergedLogsByDate = mutableMapOf<String, MutableMap<String, Any?>>()
         for (log in logs) {
             val date = log["watchedDate"]?.toString() ?: "unknown_date"
@@ -185,6 +263,31 @@ class DataSyncManager(
                     )
                 }
             }
+        }*/
+    }
+
+    private fun recomputeRewatchFlags(movieId: Long) {
+        val logs = database.movieEntityQueries.getLogsForMovieByWatchOrder(movieId).executeAsList()
+
+        var seenFirstWatch = false
+
+        for (log in logs) {
+            val hasRealWatchDate = !log.watchedDate.isNullOrBlank()
+            val newIsRewatch = if (hasRealWatchDate) {
+                if (!seenFirstWatch) {
+                    seenFirstWatch = true
+                    0L
+                } else {
+                    1L
+                }
+            } else {
+                0L
+            }
+
+            database.movieEntityQueries.updateMovieLogRewatch(
+                isRewatch = newIsRewatch,
+                id = log.id
+            )
         }
     }
 

@@ -1,10 +1,9 @@
 -- =============================================================================
--- Schema Version 2
+-- Schema Version 3
 -- Added: hungarianTitle, tmdbPopularity, tmdbVoteAverage, tmdbVoteCount,
 --        collectionName, trailerKey, mpaaRating, studios, productionCountries,
 --        spokenLanguages, similarMovies (JSON), tmdbReviews (JSON), addedDate
 -- =============================================================================
-import kotlin.collections.List;
 
 CREATE TABLE MovieEntity (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,9 +59,11 @@ CREATE TABLE MovieLogEntity (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     movieId INTEGER NOT NULL,
     watchedDate TEXT,
+    loggedDate TEXT,
     rating REAL,
     review TEXT,
     isRewatch INTEGER NOT NULL DEFAULT 0,
+    sourceType TEXT NOT NULL,
     FOREIGN KEY (movieId) REFERENCES MovieEntity(id) ON DELETE CASCADE
 );
 
@@ -92,6 +93,18 @@ ON MovieLogEntity(movieId, watchedDate);
 CREATE INDEX IF NOT EXISTS idx_movieperson_movie
 ON MoviePersonEntity(movieId);
 
+CREATE INDEX IF NOT EXISTS idx_movielog_movie_watched
+ON MovieLogEntity(movieId, watchedDate);
+
+CREATE INDEX IF NOT EXISTS idx_movielog_movie_logged
+ON MovieLogEntity(movieId, loggedDate);
+
+CREATE INDEX IF NOT EXISTS idx_movieperson_movie_job_name
+ON MoviePersonEntity(movieId, job, name);
+
+CREATE INDEX IF NOT EXISTS idx_movieperson_job_name_movie
+ON MoviePersonEntity(job, name, movieId);
+
 -- =============================================================================
 -- Queries: Persons
 -- =============================================================================
@@ -115,8 +128,8 @@ WHERE movieId IN ?;
 -- =============================================================================
 
 insertMovieLog:
-INSERT INTO MovieLogEntity(movieId, watchedDate, rating, review, isRewatch)
-VALUES (?, ?, ?, ?, ?);
+INSERT INTO MovieLogEntity(movieId, watchedDate, loggedDate, rating, review, isRewatch, sourceType)
+VALUES (?, ?, ?, ?, ?,?,?);
 
 getLogByMovieAndDate:
 SELECT * FROM MovieLogEntity
@@ -124,13 +137,52 @@ WHERE movieId = :movieId
   AND ((watchedDate IS NULL AND :date IS NULL) OR (watchedDate = :date))
 LIMIT 1;
 
+getLogByMovieAndSource:
+SELECT *
+FROM MovieLogEntity
+WHERE movieId = :movieId
+  AND sourceType = :sourceType
+  AND (
+      (watchedDate IS NULL AND :watchedDate IS NULL) OR watchedDate = :watchedDate
+  )
+  AND (
+      (loggedDate IS NULL AND :loggedDate IS NULL) OR loggedDate = :loggedDate
+  )
+LIMIT 1;
+
 getLogsForMovie:
-SELECT * FROM MovieLogEntity WHERE movieId = :movieId ORDER BY watchedDate DESC;
+SELECT *
+FROM MovieLogEntity
+WHERE movieId = :movieId
+ORDER BY COALESCE(watchedDate, loggedDate) ASC, id ASC;
+
+getLogsForMovieByWatchOrder:
+SELECT *
+FROM MovieLogEntity
+WHERE movieId = :movieId
+ORDER BY COALESCE(watchedDate, loggedDate) ASC, id ASC;
 
 updateMovieLog:
 UPDATE MovieLogEntity
-SET rating = :rating, review = :review, isRewatch = :isRewatch
+SET watchedDate = :watchedDate,
+    loggedDate = :loggedDate,
+    rating = :rating,
+    review = :review,
+    isRewatch = :isRewatch,
+    sourceType = :sourceType
 WHERE id = :id;
+
+updateMovieLogRewatch:
+UPDATE MovieLogEntity
+SET isRewatch = :isRewatch
+WHERE id = :id;
+
+updateMovieAddedDate:
+UPDATE MovieEntity
+SET addedDate = :addedDate
+WHERE id = :id;
+
+
 
 -- =============================================================================
 -- Queries: Movie CRUD
@@ -171,7 +223,7 @@ getLastInsertId:
 SELECT last_insert_rowid();
 
 -- =============================================================================
--- Queries: Lookups
+-- Queries: Movie Lookups
 -- =============================================================================
 getWatchedMovieIds:
 SELECT id
@@ -206,7 +258,7 @@ SELECT COUNT(*) FROM MovieEntity
 WHERE posterPath IS NULL AND tmdbId IS NULL;
 
 -- =============================================================================
--- Queries: For My Library and Watchlist screen
+-- Queries: For My_Library and Watchlist screen
 -- =============================================================================
 
 getWatchedMoviesForList:
@@ -218,9 +270,69 @@ SELECT
     MovieEntity.tmdbId,
     MovieEntity.letterboxdUri,
     MovieEntity.imdbId,
-    (SELECT rating FROM MovieLogEntity WHERE movieId = MovieEntity.id AND rating IS NOT NULL ORDER BY watchedDate DESC LIMIT 1) AS rating,
-    (SELECT watchedDate FROM MovieLogEntity WHERE movieId = MovieEntity.id ORDER BY watchedDate DESC LIMIT 1) AS watchedDate,
-    COALESCE((SELECT isRewatch FROM MovieLogEntity WHERE movieId = MovieEntity.id ORDER BY watchedDate DESC LIMIT 1), 0) AS isRewatch
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS rating,
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS watchedDate,
+    COALESCE(
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        0
+    ) AS isRewatch
 FROM MovieEntity
 WHERE MovieEntity.isWatched = 1;
 
@@ -233,9 +345,46 @@ SELECT
     MovieEntity.tmdbId,
     MovieEntity.letterboxdUri,
     MovieEntity.imdbId,
-    (SELECT rating FROM MovieLogEntity WHERE movieId = MovieEntity.id AND rating IS NOT NULL ORDER BY watchedDate DESC LIMIT 1) AS rating,
-    (SELECT watchedDate FROM MovieLogEntity WHERE movieId = MovieEntity.id ORDER BY watchedDate DESC LIMIT 1) AS watchedDate,
-    COALESCE((SELECT isRewatch FROM MovieLogEntity WHERE movieId = MovieEntity.id ORDER BY watchedDate DESC LIMIT 1), 0) AS isRewatch
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS rating,
+    (
+        SELECT COALESCE(watchedDate, loggedDate)
+        FROM MovieLogEntity
+        WHERE movieId = MovieEntity.id
+        ORDER BY COALESCE(watchedDate, loggedDate) DESC, id DESC
+        LIMIT 1
+    ) AS watchedDate,
+    COALESCE((
+        SELECT isRewatch
+        FROM MovieLogEntity
+        WHERE movieId = MovieEntity.id
+        ORDER BY COALESCE(watchedDate, loggedDate) DESC, id DESC
+        LIMIT 1
+    ), 0) AS isRewatch
 FROM MovieEntity
 WHERE MovieEntity.inWatchlist = 1;
 
@@ -249,54 +398,686 @@ SELECT
     m.tmdbId,
     m.letterboxdUri,
     m.imdbId,
-    -- latest rating
-    (
-      SELECT rating FROM MovieLogEntity log
-      WHERE log.movieId = m.id AND rating IS NOT NULL
-      ORDER BY watchedDate DESC
-      LIMIT 1
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
     ) AS rating,
-    -- latest watchedDate
-    (
-      SELECT watchedDate FROM MovieLogEntity log
-      WHERE log.movieId = m.id
-      ORDER BY watchedDate DESC
-      LIMIT 1
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
     ) AS watchedDate,
-    COALESCE((
-      SELECT isRewatch FROM MovieLogEntity log
-      WHERE log.movieId = m.id
-      ORDER BY watchedDate DESC
-      LIMIT 1
-    ), 0) AS isRewatch
+    COALESCE(
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        0
+    ) AS isRewatch
 FROM MovieEntity m
 JOIN MoviePersonEntity p ON p.movieId = m.id
 WHERE
-  (
-      :listType = 'WATCHED'   AND m.isWatched   = 1
-   OR :listType = 'WATCHLIST' AND m.inWatchlist = 1
-  )
-  AND p.name = :personName
-  AND (:job IS NULL OR p.job = :job)               -- 'Director' or 'Actor'
-  AND (
-      -- For WATCHLIST: ignore date range completely
-      :listType = 'WATCHLIST'
-      OR
-      -- For WATCHED: apply the date range if given
-      (
-          :listType = 'WATCHED'
-          AND (
-              :startDate IS NULL OR :endDate IS NULL
-              OR EXISTS (
-                  SELECT 1 FROM MovieLogEntity log
-                  WHERE log.movieId = m.id
-                    AND log.watchedDate BETWEEN :startDate AND :endDate
+    (
+        (:listType = 'WATCHED' AND m.isWatched = 1) OR
+        (:listType = 'WATCHLIST' AND m.inWatchlist = 1)
+    )
+    AND p.name = :personName
+    AND (:job IS NULL OR p.job = :job)
+    AND (
+        :listType = 'WATCHLIST'
+        OR :startDate IS NULL
+        OR :endDate IS NULL
+        OR EXISTS (
+            SELECT 1
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND (
+                  log.watchedDate BETWEEN :startDate AND :endDate
+                  OR (
+                      log.watchedDate IS NULL
+                      AND log.loggedDate BETWEEN :startDate AND :endDate
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM MovieLogEntity w
+                          WHERE w.movieId = m.id
+                            AND w.watchedDate IS NOT NULL
+                      )
+                  )
               )
-          )
-      )
-  );
+        )
+    );
 
-getMoviesByFilterAndDate:
+ggetMoviesByFilterAndDate:
+ SELECT
+     m.id,
+     m.name,
+     m.year,
+     m.posterPath,
+     m.tmdbId,
+     m.letterboxdUri,
+     m.imdbId,
+     COALESCE(
+         (
+             SELECT log.rating
+             FROM MovieLogEntity log
+             WHERE log.movieId = m.id
+               AND log.watchedDate IS NOT NULL
+               AND log.rating IS NOT NULL
+             ORDER BY log.watchedDate DESC, log.id DESC
+             LIMIT 1
+         ),
+         (
+             SELECT log.rating
+             FROM MovieLogEntity log
+             WHERE log.movieId = m.id
+               AND log.loggedDate IS NOT NULL
+               AND log.rating IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM MovieLogEntity w
+                   WHERE w.movieId = m.id
+                     AND w.watchedDate IS NOT NULL
+               )
+             ORDER BY log.loggedDate DESC, log.id DESC
+             LIMIT 1
+         )
+     ) AS rating,
+     COALESCE(
+         (
+             SELECT log.watchedDate
+             FROM MovieLogEntity log
+             WHERE log.movieId = m.id
+               AND log.watchedDate IS NOT NULL
+             ORDER BY log.watchedDate DESC, log.id DESC
+             LIMIT 1
+         ),
+         (
+             SELECT log.loggedDate
+             FROM MovieLogEntity log
+             WHERE log.movieId = m.id
+               AND log.loggedDate IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM MovieLogEntity w
+                   WHERE w.movieId = m.id
+                     AND w.watchedDate IS NOT NULL
+               )
+             ORDER BY log.loggedDate DESC, log.id DESC
+             LIMIT 1
+         )
+     ) AS watchedDate,
+     COALESCE(
+         (
+             SELECT log.isRewatch
+             FROM MovieLogEntity log
+             WHERE log.movieId = m.id
+               AND log.watchedDate IS NOT NULL
+             ORDER BY log.watchedDate DESC, log.id DESC
+             LIMIT 1
+         ),
+         (
+             SELECT log.isRewatch
+             FROM MovieLogEntity log
+             WHERE log.movieId = m.id
+               AND log.loggedDate IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM MovieLogEntity w
+                   WHERE w.movieId = m.id
+                     AND w.watchedDate IS NOT NULL
+               )
+             ORDER BY log.loggedDate DESC, log.id DESC
+             LIMIT 1
+         ),
+         0
+     ) AS isRewatch
+ FROM MovieEntity m
+ WHERE
+     (
+         (:listType = 'WATCHED' AND m.isWatched = 1) OR
+         (:listType = 'WATCHLIST' AND m.inWatchlist = 1)
+     )
+     AND (
+         (:filterType IS NULL OR :filterName IS NULL)
+         OR (:filterType = 'GENRE' AND m.genres LIKE '%' || :filterName || '%')
+         OR (:filterType = 'STUDIO' AND m.studios LIKE '%' || :filterName || '%')
+         OR (:filterType = 'COUNTRY' AND m.productionCountries LIKE '%' || :filterName || '%')
+     )
+     AND (
+         :listType = 'WATCHLIST'
+         OR :startDate IS NULL
+         OR :endDate IS NULL
+         OR EXISTS (
+             SELECT 1
+             FROM MovieLogEntity log
+             WHERE log.movieId = m.id
+               AND (
+                   log.watchedDate BETWEEN :startDate AND :endDate
+                   OR (
+                       log.watchedDate IS NULL
+                       AND log.loggedDate BETWEEN :startDate AND :endDate
+                       AND NOT EXISTS (
+                           SELECT 1
+                           FROM MovieLogEntity w
+                           WHERE w.movieId = m.id
+                             AND w.watchedDate IS NOT NULL
+                       )
+                   )
+               )
+         )
+     );
+
+-- =============================================================================
+-- Queries: Collections (shared SELECT columns for mapper reuse)
+-- =============================================================================
+getAllMovies:
+SELECT
+    MovieEntity.id,
+    MovieEntity.name,
+    MovieEntity.year,
+    MovieEntity.letterboxdUri,
+    MovieEntity.imdbId,
+    MovieEntity.isWatched,
+    MovieEntity.inWatchlist,
+    MovieEntity.isCached,
+    MovieEntity.posterPath,
+    MovieEntity.backdropPath,
+    MovieEntity.overview,
+    MovieEntity.runtimeMinutes,
+    MovieEntity.tmdbId,
+    MovieEntity.tagline,
+    MovieEntity.originalTitle,
+    MovieEntity.originalLanguage,
+    MovieEntity.budget,
+    MovieEntity.revenue,
+    MovieEntity.genres,
+    MovieEntity.hungarianTitle,
+    MovieEntity.tmdbPopularity,
+    MovieEntity.tmdbVoteAverage,
+    MovieEntity.tmdbVoteCount,
+    MovieEntity.collectionName,
+    MovieEntity.trailerKey,
+    MovieEntity.mpaaRating,
+    MovieEntity.addedDate,
+    MovieEntity.studios,
+    MovieEntity.productionCountries,
+    MovieEntity.spokenLanguages,
+    MovieEntity.similarMovies,
+    MovieEntity.tmdbReviews,
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS rating,
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS watchedDate,
+    COALESCE(
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        0
+    ) AS isRewatch
+FROM MovieEntity;
+
+getWatchedMovies:
+SELECT
+    MovieEntity.id,
+    MovieEntity.name,
+    MovieEntity.year,
+    MovieEntity.letterboxdUri,
+    MovieEntity.imdbId,
+    MovieEntity.isWatched,
+    MovieEntity.inWatchlist,
+    MovieEntity.isCached,
+    MovieEntity.posterPath,
+    MovieEntity.backdropPath,
+    MovieEntity.overview,
+    MovieEntity.runtimeMinutes,
+    MovieEntity.tmdbId,
+    MovieEntity.tagline,
+    MovieEntity.originalTitle,
+    MovieEntity.originalLanguage,
+    MovieEntity.budget,
+    MovieEntity.revenue,
+    MovieEntity.genres,
+    MovieEntity.hungarianTitle,
+    MovieEntity.tmdbPopularity,
+    MovieEntity.tmdbVoteAverage,
+    MovieEntity.tmdbVoteCount,
+    MovieEntity.collectionName,
+    MovieEntity.trailerKey,
+    MovieEntity.mpaaRating,
+    MovieEntity.addedDate,
+    MovieEntity.studios,
+    MovieEntity.productionCountries,
+    MovieEntity.spokenLanguages,
+    MovieEntity.similarMovies,
+    MovieEntity.tmdbReviews,
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS rating,
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS watchedDate,
+    COALESCE(
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        0
+    ) AS isRewatch
+FROM MovieEntity
+WHERE MovieEntity.isWatched = 1;
+
+getWatchlistMovies:
+SELECT
+    MovieEntity.id,
+    MovieEntity.name,
+    MovieEntity.year,
+    MovieEntity.letterboxdUri,
+    MovieEntity.imdbId,
+    MovieEntity.isWatched,
+    MovieEntity.inWatchlist,
+    MovieEntity.isCached,
+    MovieEntity.posterPath,
+    MovieEntity.backdropPath,
+    MovieEntity.overview,
+    MovieEntity.runtimeMinutes,
+    MovieEntity.tmdbId,
+    MovieEntity.tagline,
+    MovieEntity.originalTitle,
+    MovieEntity.originalLanguage,
+    MovieEntity.budget,
+    MovieEntity.revenue,
+    MovieEntity.genres,
+    MovieEntity.hungarianTitle,
+    MovieEntity.tmdbPopularity,
+    MovieEntity.tmdbVoteAverage,
+    MovieEntity.tmdbVoteCount,
+    MovieEntity.collectionName,
+    MovieEntity.trailerKey,
+    MovieEntity.mpaaRating,
+    MovieEntity.addedDate,
+    MovieEntity.studios,
+    MovieEntity.productionCountries,
+    MovieEntity.spokenLanguages,
+    MovieEntity.similarMovies,
+    MovieEntity.tmdbReviews,
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS rating,
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS watchedDate,
+    COALESCE(
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        0
+    ) AS isRewatch
+FROM MovieEntity
+WHERE MovieEntity.inWatchlist = 1;
+
+--- TODO: need to implement cached first
+getCachedMovies:
+SELECT
+    MovieEntity.id,
+    MovieEntity.name,
+    MovieEntity.year,
+    MovieEntity.letterboxdUri,
+    MovieEntity.imdbId,
+    MovieEntity.isWatched,
+    MovieEntity.inWatchlist,
+    MovieEntity.isCached,
+    MovieEntity.posterPath,
+    MovieEntity.backdropPath,
+    MovieEntity.overview,
+    MovieEntity.runtimeMinutes,
+    MovieEntity.tmdbId,
+    MovieEntity.tagline,
+    MovieEntity.originalTitle,
+    MovieEntity.originalLanguage,
+    MovieEntity.budget,
+    MovieEntity.revenue,
+    MovieEntity.genres,
+    MovieEntity.hungarianTitle,
+    MovieEntity.tmdbPopularity,
+    MovieEntity.tmdbVoteAverage,
+    MovieEntity.tmdbVoteCount,
+    MovieEntity.collectionName,
+    MovieEntity.trailerKey,
+    MovieEntity.mpaaRating,
+    MovieEntity.addedDate,
+    MovieEntity.studios,
+    MovieEntity.productionCountries,
+    MovieEntity.spokenLanguages,
+    MovieEntity.similarMovies,
+    MovieEntity.tmdbReviews,
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS rating,
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS watchedDate,
+    COALESCE(
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        0
+    ) AS isRewatch
+FROM MovieEntity
+WHERE MovieEntity.isCached = 1;
+
+getWatchedCollectionRows:
 SELECT
     m.id,
     m.name,
@@ -305,119 +1086,555 @@ SELECT
     m.tmdbId,
     m.letterboxdUri,
     m.imdbId,
-    (SELECT rating FROM MovieLogEntity log
-     WHERE log.movieId = m.id AND rating IS NOT NULL
-     ORDER BY watchedDate DESC LIMIT 1) AS rating,
-    (SELECT watchedDate FROM MovieLogEntity log
-     WHERE log.movieId = m.id
-     ORDER BY watchedDate DESC LIMIT 1) AS watchedDate,
-    COALESCE((SELECT isRewatch FROM MovieLogEntity log
-              WHERE log.movieId = m.id
-              ORDER BY watchedDate DESC LIMIT 1), 0) AS isRewatch
+    m.tmdbVoteAverage,
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS userRating,
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS watchedDate,
+    CAST(NULL AS TEXT) AS watchlistDate
+FROM MovieEntity m
+WHERE m.isWatched = 1;
+
+getWatchlistCollectionRows:
+SELECT
+    m.id,
+    m.name,
+    m.year,
+    m.posterPath,
+    m.tmdbId,
+    m.letterboxdUri,
+    m.imdbId,
+    m.tmdbVoteAverage,
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS userRating,
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS watchedDate,
+    m.addedDate AS watchlistDate
+FROM MovieEntity m
+WHERE m.inWatchlist = 1;
+
+getCachedCollectionRows:
+SELECT
+    m.id,
+    m.name,
+    m.year,
+    m.posterPath,
+    m.tmdbId,
+    m.letterboxdUri,
+    m.imdbId,
+    m.tmdbVoteAverage,
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS userRating,
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS watchedDate,
+    m.addedDate AS watchlistDate
+FROM MovieEntity m
+WHERE m.isCached = 1;
+
+getCollectionRowsByPersonAndDate:
+SELECT
+    m.id,
+    m.name,
+    m.year,
+    m.posterPath,
+    m.tmdbId,
+    m.letterboxdUri,
+    m.imdbId,
+    m.tmdbVoteAverage,
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS userRating,
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS watchedDate,
+    m.addedDate AS watchlistDate
+FROM MovieEntity m
+JOIN MoviePersonEntity p ON p.movieId = m.id
+WHERE
+    (
+        (:listType = 'WATCHED' AND m.isWatched = 1) OR
+        (:listType = 'WATCHLIST' AND m.inWatchlist = 1)
+    )
+    AND p.name = :personName
+    AND (:job IS NULL OR p.job = :job)
+    AND (
+        :listType = 'WATCHLIST'
+        OR :startDate IS NULL
+        OR :endDate IS NULL
+        OR EXISTS (
+            SELECT 1
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND (
+                  log.watchedDate BETWEEN :startDate AND :endDate
+                  OR (
+                      log.watchedDate IS NULL
+                      AND log.loggedDate BETWEEN :startDate AND :endDate
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM MovieLogEntity w
+                          WHERE w.movieId = m.id
+                            AND w.watchedDate IS NOT NULL
+                      )
+                  )
+              )
+        )
+    );
+
+getCollectionRowsByFilterAndDate:
+SELECT
+    m.id,
+    m.name,
+    m.year,
+    m.posterPath,
+    m.tmdbId,
+    m.letterboxdUri,
+    m.imdbId,
+    m.tmdbVoteAverage,
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS userRating,
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS watchedDate,
+    m.addedDate AS watchlistDate
 FROM MovieEntity m
 WHERE
-  -- watched vs watchlist selector --
-  (
-      :listType = 'WATCHED'   AND m.isWatched   = 1
-   OR :listType = 'WATCHLIST' AND m.inWatchlist = 1
-  )
-  AND (
-      -- no entity filter at all --
-      (:filterType IS NULL OR :filterName IS NULL)
-      OR (
-          :filterType = 'GENRE'
-          AND m.genres LIKE '%' || :filterName || '%'
-      )
-      OR (
-          :filterType = 'STUDIO'
-          AND m.studios LIKE '%' || :filterName || '%'
-      )
-      OR (
-          :filterType = 'COUNTRY'
-          AND m.productionCountries LIKE '%' || :filterName || '%'
-      )
-  )
-  AND (
-      -- For WATCHLIST: ignore date range completely
-      :listType = 'WATCHLIST'
-      OR
-      -- For WATCHED: apply the date range if given
-      (
-          :listType = 'WATCHED'
-          AND (
-              :startDate IS NULL OR :endDate IS NULL
-              OR EXISTS (
-                  SELECT 1 FROM MovieLogEntity log
-                  WHERE log.movieId = m.id
-                    AND log.watchedDate BETWEEN :startDate AND :endDate
+    (
+        (:listType = 'WATCHED' AND m.isWatched = 1) OR
+        (:listType = 'WATCHLIST' AND m.inWatchlist = 1)
+    )
+    AND (
+        (:filterType = 'GENRE' AND m.genres LIKE '%' || :filterName || '%') OR
+        (:filterType = 'STUDIO' AND m.studios LIKE '%' || :filterName || '%') OR
+        (:filterType = 'COUNTRY' AND m.productionCountries LIKE '%' || :filterName || '%')
+    )
+    AND (
+        :listType = 'WATCHLIST'
+        OR :startDate IS NULL
+        OR :endDate IS NULL
+        OR EXISTS (
+            SELECT 1
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND (
+                  log.watchedDate BETWEEN :startDate AND :endDate
+                  OR (
+                      log.watchedDate IS NULL
+                      AND log.loggedDate BETWEEN :startDate AND :endDate
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM MovieLogEntity w
+                          WHERE w.movieId = m.id
+                            AND w.watchedDate IS NOT NULL
+                      )
+                  )
               )
-          )
+        )
+    );
+
+getCollectionRowsByDuoAndDate:
+SELECT DISTINCT
+    m.id,
+    m.name,
+    m.year,
+    m.posterPath,
+    m.tmdbId,
+    m.letterboxdUri,
+    m.imdbId,
+    m.tmdbVoteAverage,
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS userRating,
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = m.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS watchedDate,
+    m.addedDate AS watchlistDate
+FROM MovieEntity m
+JOIN MoviePersonEntity p1 ON p1.movieId = m.id
+JOIN MoviePersonEntity p2 ON p2.movieId = m.id
+WHERE
+    (
+        (:listType = 'WATCHED' AND m.isWatched = 1) OR
+        (:listType = 'WATCHLIST' AND m.inWatchlist = 1)
+    )
+    AND p1.name = :firstName
+    AND p2.name = :secondName
+    AND p1.id != p2.id
+    AND (:firstJob IS NULL OR p1.job = :firstJob)
+    AND (:secondJob IS NULL OR p2.job = :secondJob)
+    AND (
+        :listType = 'WATCHLIST'
+        OR :startDate IS NULL
+        OR :endDate IS NULL
+        OR EXISTS (
+            SELECT 1
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND (
+                  log.watchedDate BETWEEN :startDate AND :endDate
+                  OR (
+                      log.watchedDate IS NULL
+                      AND log.loggedDate BETWEEN :startDate AND :endDate
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM MovieLogEntity w
+                          WHERE w.movieId = m.id
+                            AND w.watchedDate IS NOT NULL
+                      )
+                  )
+              )
+        )
+    );
+
+-- =============================================================================
+-- Queries: Entity Suggestions
+-- =============================================================================
+getPersonSuggestionsByJob:
+SELECT DISTINCT name
+FROM MoviePersonEntity
+WHERE job = :job
+  AND name LIKE '%' || :query || '%'
+ORDER BY name COLLATE NOCASE
+LIMIT 8;
+
+getActorActorDuosByDate:
+WITH watched_movies AS (
+    SELECT DISTINCT m.id
+    FROM MovieEntity m
+    WHERE m.isWatched = 1
+      AND (
+        :startDate IS NULL OR :endDate IS NULL
+        OR EXISTS (
+            SELECT 1
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate BETWEEN :startDate AND :endDate
+        )
       )
-  );
-
--- =============================================================================
--- Queries: Collections (shared SELECT columns for mapper reuse)
--- =============================================================================
-getAllMovies:
+)
 SELECT
-    MovieEntity.id, MovieEntity.name, MovieEntity.year, MovieEntity.letterboxdUri, MovieEntity.imdbId,
-    MovieEntity.isWatched, MovieEntity.inWatchlist, MovieEntity.isCached,
-    MovieEntity.posterPath, MovieEntity.backdropPath, MovieEntity.overview, MovieEntity.runtimeMinutes, MovieEntity.tmdbId,
-    MovieEntity.tagline, MovieEntity.originalTitle, MovieEntity.originalLanguage, MovieEntity.budget, MovieEntity.revenue, MovieEntity.genres,
-    MovieEntity.hungarianTitle, MovieEntity.tmdbPopularity, MovieEntity.tmdbVoteAverage, MovieEntity.tmdbVoteCount,
-    MovieEntity.collectionName, MovieEntity.trailerKey, MovieEntity.mpaaRating, MovieEntity.addedDate,
-    MovieEntity.studios, MovieEntity.productionCountries, MovieEntity.spokenLanguages,
-    MovieEntity.similarMovies, MovieEntity.tmdbReviews,
-    (SELECT rating FROM MovieLogEntity WHERE movieId = MovieEntity.id AND rating IS NOT NULL ORDER BY watchedDate DESC LIMIT 1) AS rating,
-    (SELECT watchedDate FROM MovieLogEntity WHERE movieId = MovieEntity.id ORDER BY watchedDate DESC LIMIT 1) AS watchedDate,
-    COALESCE((SELECT isRewatch FROM MovieLogEntity WHERE movieId = MovieEntity.id ORDER BY watchedDate DESC LIMIT 1), 0) AS isRewatch
-FROM MovieEntity;
+    CASE WHEN p1.name <= p2.name THEN p1.name ELSE p2.name END AS leftName,
+    CASE WHEN p1.name <= p2.name THEN p2.name ELSE p1.name END AS rightName,
+    CASE WHEN p1.name <= p2.name THEN COALESCE(p1.profilePath, p2.profilePath)
+         ELSE COALESCE(p2.profilePath, p1.profilePath) END AS leftPhotoPath,
+    CASE WHEN p1.name <= p2.name THEN COALESCE(p2.profilePath, p1.profilePath)
+         ELSE COALESCE(p1.profilePath, p2.profilePath) END AS rightPhotoPath,
+    COUNT(DISTINCT wm.id) AS count
+FROM watched_movies wm
+JOIN MoviePersonEntity p1 ON p1.movieId = wm.id
+JOIN MoviePersonEntity p2 ON p2.movieId = wm.id
+WHERE p1.job = 'Actor'
+  AND p2.job = 'Actor'
+  AND p1.id < p2.id
+  AND p1.name != p2.name
+GROUP BY leftName, rightName
+HAVING COUNT(DISTINCT wm.id) >= 2
+ORDER BY count DESC, leftName ASC, rightName ASC;
 
-getWatchedMovies:
+getActorDirectorDuosByDate:
+WITH watched_movies AS (
+    SELECT DISTINCT m.id
+    FROM MovieEntity m
+    WHERE m.isWatched = 1
+      AND (
+        :startDate IS NULL OR :endDate IS NULL
+        OR EXISTS (
+            SELECT 1
+            FROM MovieLogEntity log
+            WHERE log.movieId = m.id
+              AND log.watchedDate BETWEEN :startDate AND :endDate
+        )
+      )
+)
 SELECT
-    MovieEntity.id, MovieEntity.name, MovieEntity.year, MovieEntity.letterboxdUri, MovieEntity.imdbId,
-    MovieEntity.isWatched, MovieEntity.inWatchlist, MovieEntity.isCached,
-    MovieEntity.posterPath, MovieEntity.backdropPath, MovieEntity.overview, MovieEntity.runtimeMinutes, MovieEntity.tmdbId,
-    MovieEntity.tagline, MovieEntity.originalTitle, MovieEntity.originalLanguage, MovieEntity.budget, MovieEntity.revenue, MovieEntity.genres,
-    MovieEntity.hungarianTitle, MovieEntity.tmdbPopularity, MovieEntity.tmdbVoteAverage, MovieEntity.tmdbVoteCount,
-    MovieEntity.collectionName, MovieEntity.trailerKey, MovieEntity.mpaaRating, MovieEntity.addedDate,
-    MovieEntity.studios, MovieEntity.productionCountries, MovieEntity.spokenLanguages,
-    MovieEntity.similarMovies, MovieEntity.tmdbReviews,
-    (SELECT rating FROM MovieLogEntity WHERE movieId = MovieEntity.id AND rating IS NOT NULL ORDER BY watchedDate DESC LIMIT 1) AS rating,
-    (SELECT watchedDate FROM MovieLogEntity WHERE movieId = MovieEntity.id ORDER BY watchedDate DESC LIMIT 1) AS watchedDate,
-    COALESCE((SELECT isRewatch FROM MovieLogEntity WHERE movieId = MovieEntity.id ORDER BY watchedDate DESC LIMIT 1), 0) AS isRewatch
-FROM MovieEntity
-WHERE MovieEntity.isWatched = 1;
+    actor.name AS leftName,
+    director.name AS rightName,
+    actor.profilePath AS leftPhotoPath,
+    director.profilePath AS rightPhotoPath,
+    COUNT(DISTINCT wm.id) AS count
+FROM watched_movies wm
+JOIN MoviePersonEntity actor ON actor.movieId = wm.id
+JOIN MoviePersonEntity director ON director.movieId = wm.id
+WHERE actor.job = 'Actor'
+  AND director.job = 'Director'
+  AND actor.name != director.name
+GROUP BY actor.name, director.name
+HAVING COUNT(DISTINCT wm.id) >= 2
+ORDER BY count DESC, leftName ASC, rightName ASC;
 
-getWatchlistMovies:
-SELECT
-    MovieEntity.id, MovieEntity.name, MovieEntity.year, MovieEntity.letterboxdUri, MovieEntity.imdbId,
-    MovieEntity.isWatched, MovieEntity.inWatchlist, MovieEntity.isCached,
-    MovieEntity.posterPath, MovieEntity.backdropPath, MovieEntity.overview, MovieEntity.runtimeMinutes, MovieEntity.tmdbId,
-    MovieEntity.tagline, MovieEntity.originalTitle, MovieEntity.originalLanguage, MovieEntity.budget, MovieEntity.revenue, MovieEntity.genres,
-    MovieEntity.hungarianTitle, MovieEntity.tmdbPopularity, MovieEntity.tmdbVoteAverage, MovieEntity.tmdbVoteCount,
-    MovieEntity.collectionName, MovieEntity.trailerKey, MovieEntity.mpaaRating, MovieEntity.addedDate,
-    MovieEntity.studios, MovieEntity.productionCountries, MovieEntity.spokenLanguages,
-    MovieEntity.similarMovies, MovieEntity.tmdbReviews,
-    (SELECT rating FROM MovieLogEntity WHERE movieId = MovieEntity.id AND rating IS NOT NULL ORDER BY watchedDate DESC LIMIT 1) AS rating,
-    (SELECT watchedDate FROM MovieLogEntity WHERE movieId = MovieEntity.id ORDER BY watchedDate DESC LIMIT 1) AS watchedDate,
-    COALESCE((SELECT isRewatch FROM MovieLogEntity WHERE movieId = MovieEntity.id ORDER BY watchedDate DESC LIMIT 1), 0) AS isRewatch
-FROM MovieEntity
-WHERE MovieEntity.inWatchlist = 1;
 
---- TODO: we need to implement cached first
-getCachedMovies:
-SELECT
-    MovieEntity.id, MovieEntity.name, MovieEntity.year, MovieEntity.letterboxdUri, MovieEntity.imdbId,
-    MovieEntity.isWatched, MovieEntity.inWatchlist, MovieEntity.isCached,
-    MovieEntity.posterPath, MovieEntity.backdropPath, MovieEntity.overview, MovieEntity.runtimeMinutes, MovieEntity.tmdbId,
-    MovieEntity.tagline, MovieEntity.originalTitle, MovieEntity.originalLanguage, MovieEntity.budget, MovieEntity.revenue, MovieEntity.genres,
-    MovieEntity.hungarianTitle, MovieEntity.tmdbPopularity, MovieEntity.tmdbVoteAverage, MovieEntity.tmdbVoteCount,
-    MovieEntity.collectionName, MovieEntity.trailerKey, MovieEntity.mpaaRating, MovieEntity.addedDate,
-    MovieEntity.studios, MovieEntity.productionCountries, MovieEntity.spokenLanguages,
-    MovieEntity.similarMovies, MovieEntity.tmdbReviews,
-    (SELECT rating FROM MovieLogEntity WHERE movieId = MovieEntity.id AND rating IS NOT NULL ORDER BY watchedDate DESC LIMIT 1) AS rating,
-    (SELECT watchedDate FROM MovieLogEntity WHERE movieId = MovieEntity.id ORDER BY watchedDate DESC LIMIT 1) AS watchedDate,
-    COALESCE((SELECT isRewatch FROM MovieLogEntity WHERE movieId = MovieEntity.id ORDER BY watchedDate DESC LIMIT 1), 0) AS isRewatch
-FROM MovieEntity
-WHERE MovieEntity.isCached = 1;
+deleteAllData:
+DELETE FROM MovieEntity;
+DELETE FROM MovieLogEntity;
+DELETE FROM MoviePersonEntity;

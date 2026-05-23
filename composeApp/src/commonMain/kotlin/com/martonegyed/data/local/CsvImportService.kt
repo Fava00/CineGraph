@@ -3,8 +3,13 @@ package com.martonegyed.data.local
 class CsvImportService {
 
     fun parseCsv(csvContent: String, platform: String, type: String): List<Map<String, Any>> {
+
         val rows = parseCsvString(csvContent)
-        if (rows.isEmpty()) return emptyList()
+
+        if (rows.isEmpty()) {
+            return emptyList()
+        }
+
         var headerIndex = 0
         for (i in rows.indices) {
             val rowLower = rows[i].map { it.lowercase().trim() }
@@ -14,16 +19,25 @@ class CsvImportService {
             }
         }
 
-        if (headerIndex >= rows.size) return emptyList()
+
+        if (headerIndex >= rows.size) {
+            return emptyList()
+        }
 
         val headers = rows[headerIndex].map { it.lowercase().trim() }
         val dataRows = rows.drop(headerIndex + 1)
 
-        return when (platform.lowercase()) {
+
+
+        val result = when (platform.lowercase()) {
             "letterboxd" -> parseLetterboxd(headers, dataRows, type.lowercase())
             "imdb" -> parseImdb(headers, dataRows, type.lowercase())
-            else -> emptyList()
+            else -> {
+                emptyList()
+            }
         }
+
+        return result
     }
 
     private fun parseCsvString(content: String): List<List<String>> {
@@ -67,19 +81,28 @@ class CsvImportService {
         return lines
     }
 
-    private fun parseLetterboxd(headers: List<String>, rows: List<List<String>>, type: String): List<Map<String, Any>> {
+    private fun parseLetterboxd(
+        headers: List<String>,
+        rows: List<List<String>>,
+        type: String
+    ): List<Map<String, Any>> {
         val parsedMovies = mutableListOf<Map<String, Any>>()
 
         val nameIdx = headers.indexOf("name")
         val yearIdx = headers.indexOf("year")
         val ratingIdx = headers.indexOf("rating")
-        val dateIdx = headers.indexOf("watched date").takeIf { it >= 0 } ?: headers.indexOf("date")
+        val watchedDateIdx = headers.indexOf("watched date")
+        val loggedDateIdx = headers.indexOf("date")
         val rewatchIdx = headers.indexOf("rewatch")
         val reviewIdx = headers.indexOf("review")
         val uriIdx = headers.indexOf("letterboxd uri").takeIf { it >= 0 } ?: headers.indexOf("url")
 
+
         for (row in rows) {
-            if (nameIdx == -1 || row.size <= nameIdx) continue
+
+            if (nameIdx == -1 || row.size <= nameIdx) {
+                continue
+            }
 
             val map = mutableMapOf<String, Any>()
             map["name"] = row[nameIdx]
@@ -88,25 +111,67 @@ class CsvImportService {
             if (uriIdx != -1 && row.size > uriIdx) map["letterboxdUri"] = row[uriIdx]
             if (ratingIdx != -1 && row.size > ratingIdx) map["rating"] = row[ratingIdx].toDoubleOrNull() ?: 0.0
 
-            if (dateIdx != -1 && row.size > dateIdx) {
-                if (type == "watchlist" || type == "lists") {
-                    map["addedDate"] = row[dateIdx]
-                } else {
-                    map["watchedDate"] = row[dateIdx]
+            val watchedDate = if (watchedDateIdx != -1 && row.size > watchedDateIdx) {
+                row[watchedDateIdx].takeIf { it.isNotBlank() }
+            } else null
+
+            val loggedDate = if (loggedDateIdx != -1 && row.size > loggedDateIdx) {
+                row[loggedDateIdx].takeIf { it.isNotBlank() }
+            } else null
+
+            when (type) {
+                "watchlist", "lists" -> {
+                    if (!loggedDate.isNullOrBlank()) {
+                        map["addedDate"] = loggedDate
+                    }
+                    map["inWatchlist"] = true
+                }
+
+                "diary", "reviews" -> {
+                    if (!watchedDate.isNullOrBlank()) {
+                        map["watchedDate"] = watchedDate
+                    }
+                    if (!loggedDate.isNullOrBlank()) {
+                        map["loggedDate"] = loggedDate
+                    }
+                    map["sourceType"] = type.uppercase()
+                }
+
+                "watched", "ratings" -> {
+                    if (!loggedDate.isNullOrBlank()) {
+                        map["loggedDate"] = loggedDate
+                    }
+                    map["sourceType"] = type.uppercase()
+                }
+
+                else -> {
+                    if (!watchedDate.isNullOrBlank()) {
+                        map["watchedDate"] = watchedDate
+                    }
+                    if (!loggedDate.isNullOrBlank()) {
+                        map["loggedDate"] = loggedDate
+                    }
+                    map["sourceType"] = type.uppercase()
                 }
             }
 
-            if (rewatchIdx != -1 && row.size > rewatchIdx) map["isRewatch"] = row[rewatchIdx].lowercase() == "yes"
-            if (reviewIdx != -1 && row.size > reviewIdx) map["userReview"] = row[reviewIdx]
-
-            if (type == "watchlist") map["inWatchlist"] = true
+            if (rewatchIdx != -1 && row.size > rewatchIdx) {
+                map["isRewatch"] = row[rewatchIdx].equals("yes", ignoreCase = true)
+            }
+            if (reviewIdx != -1 && row.size > reviewIdx && row[reviewIdx].isNotBlank()) {
+                map["userReview"] = row[reviewIdx]
+            }
 
             parsedMovies.add(map)
         }
         return parsedMovies
     }
 
-    private fun parseImdb(headers: List<String>, rows: List<List<String>>, type: String): List<Map<String, Any>> {
+    private fun parseImdb(
+        headers: List<String>,
+        rows: List<List<String>>,
+        type: String
+    ): List<Map<String, Any>> {
         val parsedMovies = mutableListOf<Map<String, Any>>()
 
         val titleIdx = headers.indexOf("title")
@@ -124,26 +189,43 @@ class CsvImportService {
             map["name"] = row[titleIdx]
             map["year"] = if (yearIdx != -1 && row.size > yearIdx) row[yearIdx].toIntOrNull() ?: 0 else 0
 
-            if (originalTitleIdx != -1 && row.size > originalTitleIdx) map["originalTitle"] = row[originalTitleIdx]
-            if (constIdx != -1 && row.size > constIdx) map["imdbId"] = row[constIdx]
-            if (userRatingIdx != -1 && row.size > userRatingIdx && row[userRatingIdx].isNotEmpty()) {
+            if (originalTitleIdx != -1 && row.size > originalTitleIdx && row[originalTitleIdx].isNotBlank()) {
+                map["originalTitle"] = row[originalTitleIdx]
+            }
+
+            if (constIdx != -1 && row.size > constIdx && row[constIdx].isNotBlank()) {
+                map["imdbId"] = row[constIdx]
+            }
+
+            if (userRatingIdx != -1 && row.size > userRatingIdx && row[userRatingIdx].isNotBlank()) {
                 map["rating"] = row[userRatingIdx].toDoubleOrNull() ?: 0.0
             }
 
-            if (dateRatedIdx != -1 && row.size > dateRatedIdx && row[dateRatedIdx].isNotEmpty()) {
-                map["watchedDate"] = row[dateRatedIdx]
-            } else if (createdIdx != -1 && row.size > createdIdx && row[createdIdx].isNotEmpty()) {
-                if (type == "watchlist" || type == "lists") {
-                    map["addedDate"] = row[createdIdx]
-                } else {
-                    map["watchedDate"] = row[createdIdx]
-                }
-            }
+            val dateRated = if (dateRatedIdx != -1 && row.size > dateRatedIdx) {
+                row[dateRatedIdx].takeIf { it.isNotBlank() }
+            } else null
 
-            if (type == "watchlist") map["inWatchlist"] = true
+            val created = if (createdIdx != -1 && row.size > createdIdx) {
+                row[createdIdx].takeIf { it.isNotBlank() }
+            } else null
+
+            if (type == "watchlist" || type == "lists") {
+                if (!created.isNullOrBlank()) {
+                    map["addedDate"] = created
+                }
+                map["inWatchlist"] = true
+            } else {
+                if (!dateRated.isNullOrBlank()) {
+                    map["loggedDate"] = dateRated
+                } else if (!created.isNullOrBlank()) {
+                    map["loggedDate"] = created
+                }
+                map["sourceType"] = type.uppercase()
+            }
 
             parsedMovies.add(map)
         }
+
         return parsedMovies
     }
 }

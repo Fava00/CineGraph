@@ -76,6 +76,9 @@ kotlin {
             implementation(libs.coil.network.ktor)
 
             implementation(libs.coroutines.extensions)
+
+            implementation(libs.vico.compose)
+            implementation(libs.vico.compose.m3)
         }
 
         iosMain.dependencies {

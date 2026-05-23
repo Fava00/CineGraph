@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -25,13 +26,16 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
+import com.martonegyed.core.util.toListDisplayModel
+import com.martonegyed.core.ui.adaptive.AdaptiveLayout
+import com.martonegyed.presentation.analytics.StatRange
 import com.martonegyed.presentation.components.common.AppDrawer
-import com.martonegyed.presentation.components.common.MovieCard
+import com.martonegyed.presentation.components.common.cards.MovieCard
 import com.martonegyed.presentation.components.common.MovieListItem
 import com.martonegyed.presentation.screens.details.MovieDetailScreen
 import com.martonegyed.presentation.screens.statistics.StatEntityType
-import com.martonegyed.presentation.screens.statistics.StatRange
 import kotlinx.coroutines.launch
+import kotlin.math.floor
 
 data class MovieCollectionScreen(
     val type: CollectionType = CollectionType.LIBRARY,
@@ -39,7 +43,13 @@ data class MovieCollectionScreen(
     val entityName: String? = null,
     val range: StatRange? = null,
     val year: Int? = null,
-    val month: Int? = null
+    val month: Int? = null,
+    val decadeStart: Int? = null,
+    val rating: Double? = null,
+    val firstName: String? = null,
+    val secondName: String? = null,
+    val firstJob: String? = null,
+    val secondJob: String? = null
 ) : Screen {
     override val key: String =
         "MovieCollectionScreen_${type.name}_" +
@@ -64,19 +74,55 @@ data class MovieCollectionScreen(
         val currentListType by screenModel.currentListType.collectAsState()
 
 
-        LaunchedEffect(type, entityType, entityName, range, year, month) {
-            if (type == CollectionType.BY_ENTITY &&
-                entityType != null && entityName != null && range != null
-            ) {
-                screenModel.initCollectionForEntity(
-                    entityType = entityType,
-                    entityName = entityName,
-                    range = range,
-                    year = year,
-                    month = month
-                )
-            } else {
-                screenModel.initCollection(type)
+        LaunchedEffect(
+            type, entityType, entityName, range, year, month,
+            decadeStart, rating, firstName, secondName, firstJob, secondJob
+        ) {
+            when (type) {
+                CollectionType.BY_ENTITY if entityType != null &&
+                        entityName != null &&
+                        range != null -> {
+                    screenModel.initCollectionForEntity(
+                        entityType = entityType,
+                        entityName = entityName,
+                        range = range,
+                        year = year,
+                        month = month
+                    )
+                }
+
+                CollectionType.BY_DECADE if decadeStart != null -> {
+                    screenModel.initCollectionForDecade(
+                        decadeStart = decadeStart,
+                        range = range ?: StatRange.ALL_TIME,
+                        year = year,
+                        month = month
+                    )
+                }
+
+                CollectionType.BY_RATING if rating != null -> {
+                    screenModel.initCollectionForRating(
+                        rating = rating,
+                        range = range ?: StatRange.ALL_TIME,
+                        year = year,
+                        month = month
+                    )
+                }
+
+                CollectionType.BY_DUO if firstName != null &&
+                        secondName != null -> {
+                    screenModel.initCollectionForDuo(
+                        firstName = firstName,
+                        secondName = secondName,
+                        firstJob = firstJob,
+                        secondJob = secondJob,
+                        range = range ?: StatRange.ALL_TIME,
+                        year = year,
+                        month = month
+                    )
+                }
+
+                else -> screenModel.initCollection(type)
             }
         }
 
@@ -86,22 +132,49 @@ data class MovieCollectionScreen(
         val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
         val scope = rememberCoroutineScope()
 
-        val titleText = when {
-            type == CollectionType.BY_ENTITY && entityName != null -> {
-                val rangeLabel = when (range) {
-                    StatRange.ALL_TIME, null -> "All time"
-                    StatRange.YEAR -> year?.toString() ?: "Year"
-                    StatRange.MONTH -> {
-                        val y = year?.toString() ?: "Year"
-                        val m = month?.toString() ?: "Month"
-                        "$y · $m"
-                    }
+        fun rangeLabel(range: StatRange?, year: Int?, month: Int?): String {
+            val monthNames = listOf(
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            )
+            return when (range) {
+                StatRange.YEAR -> "${year ?: "Year"}."
+                StatRange.MONTH -> {
+                    val y = year ?: "Year"
+                    val m = month?.takeIf { it in 1..12 }?.let { monthNames[it - 1] } ?: "Month"
+                    "$y. $m"
                 }
-                "$entityName · $rangeLabel"
-            }
 
-            else -> type.title
+                else -> "All time"
+            }
         }
+
+        val titlePrefix = when (type) {
+            CollectionType.BY_ENTITY
+                if entityName != null ->
+                entityName
+
+            CollectionType.BY_DUO
+                if firstName != null && secondName != null ->
+                "$firstName & $secondName"
+
+            CollectionType.BY_DECADE
+                if decadeStart != null ->
+                "${decadeStart}s"
+
+            CollectionType.BY_RATING
+                if rating != null ->
+                "★ $rating"
+
+            else -> null
+        }
+
+        val titleText = if (titlePrefix != null) {
+            "$titlePrefix - ${rangeLabel(range, year, month)}"
+        } else {
+            type.title
+        }
+
         if (isLoading && displayedMovies.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -109,7 +182,7 @@ data class MovieCollectionScreen(
                     .background(colors.background),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = colors.scrim)
+                CircularProgressIndicator(color = colors.inversePrimary)
             }
         } else {
             ModalNavigationDrawer(
@@ -130,7 +203,13 @@ data class MovieCollectionScreen(
                                     TextField(
                                         value = searchQuery,
                                         onValueChange = { screenModel.updateSearchQuery(it) },
-                                        placeholder = { Text("Search movies...", color = colors.onSurfaceVariant) },
+                                        placeholder = {
+                                            Text(
+                                                "Search movies...",
+                                                color = colors.onSurfaceVariant,
+                                                maxLines = 2
+                                            )
+                                        },
                                         colors = TextFieldDefaults.colors(
                                             focusedContainerColor = Color.Transparent,
                                             unfocusedContainerColor = Color.Transparent,
@@ -140,17 +219,17 @@ data class MovieCollectionScreen(
                                         singleLine = true
                                     )
                                 } else {
-                                    Text(titleText)
+                                    Text(titleText, maxLines = 2)
                                 }
                             },
                             navigationIcon = {
-                                if (type == CollectionType.BY_ENTITY) {
-                                    IconButton(onClick = { navigator.pop() }) {
-                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                                    }
-                                } else {
+                                if (type == CollectionType.LIBRARY || type == CollectionType.WATCHLIST) {
                                     IconButton(onClick = { scope.launch { drawerState.open() } }) {
                                         Icon(Icons.Default.Menu, contentDescription = "Menu")
+                                    }
+                                } else {
+                                    IconButton(onClick = { navigator.pop() }) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                                     }
                                 }
                             },
@@ -175,146 +254,252 @@ data class MovieCollectionScreen(
                         )
                     }
                 ) { padding ->
-                    Column(
+                    AdaptiveLayout(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(padding)
-                            .background(colors.background.copy(blue = 0.15f)),
-                    ) {
-                        if (type == CollectionType.BY_ENTITY) {
-                            Row(
+                            .background(Color(0xFF14181c))
+                    ) { adaptive ->
+
+                        val scaffoldTokens = adaptive.tokens.scaffold
+                        val collectionTokens = adaptive.tokens.movieCollection
+                        val listPosterWidth = when {
+                            adaptive.window.isExpanded -> 78.dp
+                            adaptive.window.isMedium -> 70.dp
+                            else -> 64.dp
+                        }
+
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .widthIn(max = scaffoldTokens.maxCenteredContentWidth)
+                        ) {
+                            if (type == CollectionType.BY_ENTITY) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color.Black.copy(alpha = 0.25f))
+                                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Show",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontSize = collectionTokens.metaFontSize
+                                        )
+                                    )
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        FilterChip(
+                                            selected = currentListType == MovieListType.WATCHED,
+                                            onClick = { screenModel.switchListType(MovieListType.WATCHED) },
+                                            label = { Text("Watched") }
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        FilterChip(
+                                            selected = currentListType == MovieListType.WATCHLIST,
+                                            onClick = { screenModel.switchListType(MovieListType.WATCHLIST) },
+                                            label = { Text("Watchlist") }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(colors.background.copy(alpha = 0.25f))
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .background(Color.Black.copy(alpha = 0.2f))
+                                    .padding(horizontal = 16.dp, vertical = 10.dp)
                             ) {
                                 Text(
-                                    text = "Show",
-                                    color = colors.onBackground,
-                                    style = MaterialTheme.typography.bodyMedium
+                                    text = "${displayedMovies.size} movies",
+                                    color = Color.Gray,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = collectionTokens.countFontSize
+                                    )
                                 )
-                                Row {
-                                    FilterChip(
-                                        selected = currentListType == MovieListType.WATCHED,
-                                        onClick = { screenModel.switchListType(MovieListType.WATCHED) },
-                                        label = { Text("Watched") }
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    FilterChip(
-                                        selected = currentListType == MovieListType.WATCHLIST,
-                                        onClick = { screenModel.switchListType(MovieListType.WATCHLIST) },
-                                        label = { Text("Watchlist") }
-                                    )
-                                }
                             }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(colors.background.copy(alpha = 0.2f))
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                "${displayedMovies.size} movies",
-                                color = colors.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
 
-                        if (isGrid) {
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(3),
-                                contentPadding = PaddingValues(12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                items(displayedMovies) { movie ->
-                                    MovieCard(
-                                        movie = movie,
-                                        onTap = { navigator.push(MovieDetailScreen(movie)) }
-                                    )
+                            if (isGrid) {
+                                BoxWithConstraints(
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    val columns = if (adaptive.window.isCompact) 3 else floor(
+                                        maxWidth / (collectionTokens.minGridItemWidth + collectionTokens.gridSpacing)
+                                    ).toInt().coerceAtLeast(3)
+
+                                    val totalSpacing = collectionTokens.gridSpacing * (columns - 1)
+                                    val availableWidth = maxWidth - totalSpacing
+                                    val itemWidth = availableWidth / columns
+
+                                    LazyVerticalGrid(
+                                        columns = GridCells.Fixed(columns),
+                                        contentPadding = PaddingValues(
+                                            horizontal = 0.dp,
+                                            vertical = collectionTokens.gridSpacing
+                                        ),
+                                        horizontalArrangement = Arrangement.spacedBy(
+                                            collectionTokens.gridSpacing,
+                                            Alignment.CenterHorizontally
+                                        ),
+                                        verticalArrangement = Arrangement.spacedBy(collectionTokens.gridSpacing),
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        items(displayedMovies) { row ->
+                                            val item = row.toListDisplayModel(currentListType)
+                                            val movie = row.toMovie(
+                                                preferWatchlistDate = currentListType == MovieListType.WATCHLIST
+                                            )
+
+                                            Box(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                contentAlignment = Alignment.TopCenter
+                                            ) {
+                                                MovieCard(
+                                                    item = item,
+                                                    posterMaxWidth = itemWidth - 16.dp,
+                                                    titleFontSize = collectionTokens.titleFontSize,
+                                                    metaFontSize = collectionTokens.metaFontSize,
+                                                    onTap = { navigator.push(MovieDetailScreen(movie)) }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                LazyColumn(
+                                    contentPadding = PaddingValues(
+                                        horizontal = scaffoldTokens.horizontalPadding,
+                                        vertical = collectionTokens.gridSpacing
+                                    ),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    items(displayedMovies) { row ->
+                                        val item = row.toListDisplayModel(currentListType)
+                                        val movie = row.toMovie(
+                                            preferWatchlistDate = currentListType == MovieListType.WATCHLIST
+                                        )
+                                        MovieListItem(
+                                            item = item,
+                                            posterWidth = listPosterWidth,
+                                            titleFontSize = when {
+                                                adaptive.window.isExpanded -> 18.sp
+                                                adaptive.window.isMedium -> 17.sp
+                                                else -> 16.sp
+                                            },
+                                            metaFontSize = collectionTokens.metaFontSize,
+                                            supportingFontSize = collectionTokens.countFontSize,
+                                            onTap = {
+                                                navigator.push(MovieDetailScreen(movie))
+                                            }
+                                        )
+                                    }
                                 }
                             }
-                        } else {
-                            LazyColumn(
-                                contentPadding = PaddingValues(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                        }
+                        if (showSortSheet) {
+                            val sheetState = rememberModalBottomSheetState(
+                                skipPartiallyExpanded = true,
+                            )
+                            ModalBottomSheet(
+                                sheetState = sheetState,
+                                onDismissRequest = { showSortSheet = false },
+                                containerColor = colors.secondary,
+                                dragHandle = {
+                                    BottomSheetDefaults.DragHandle(color = colors.onSurfaceVariant)
+                                },
+                                modifier = Modifier.padding(
+                                    horizontal = if (adaptive.window.isCompact) 30.dp else 0.dp
+                                )
                             ) {
-                                items(displayedMovies) { movie ->
-                                    MovieListItem(
-                                        movie = movie,
-                                        onTap = { navigator.push(MovieDetailScreen(movie)) }
-                                    )
+                                Surface(
+                                    color = colors.secondary,
+                                    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 420.dp),
+                                        contentPadding = PaddingValues(bottom = 32.dp)
+                                    ) {
+                                        item {
+                                            Text(
+                                                text = "Sort By",
+                                                style = MaterialTheme.typography.titleLarge.copy(
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = colors.onSecondary
+                                                ),
+                                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                            )
+                                        }
+
+                                        item {
+                                            HorizontalDivider(color = colors.onSecondary.copy(alpha = 0.2f))
+                                        }
+
+                                        item {
+                                            SortOptionItem("Date Watched", SortOption.DATE_WATCHED, currentSort) {
+                                                screenModel.updateSort(SortOption.DATE_WATCHED)
+                                            }
+                                        }
+                                        item {
+                                            SortOptionItem("Release Year", SortOption.RELEASE_YEAR, currentSort) {
+                                                screenModel.updateSort(SortOption.RELEASE_YEAR)
+                                            }
+                                        }
+                                        item {
+                                            SortOptionItem("Rating", SortOption.RATING, currentSort) {
+                                                screenModel.updateSort(SortOption.RATING)
+                                            }
+                                        }
+                                        item {
+                                            SortOptionItem("Name", SortOption.NAME, currentSort) {
+                                                screenModel.updateSort(SortOption.NAME)
+                                            }
+                                        }
+
+                                        item {
+                                            HorizontalDivider(
+                                                color = colors.onSecondary.copy(alpha = 0.2f),
+                                                modifier = Modifier.padding(vertical = 8.dp)
+                                            )
+                                        }
+
+                                        item {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 16.dp, vertical = 32.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    "Ascending Order",
+                                                    color = colors.onSecondary,
+                                                    fontSize = 16.sp
+                                                )
+
+                                                Switch(
+                                                    checked = isAscending,
+                                                    onCheckedChange = { checked ->
+                                                        screenModel.toggleAscending(checked)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                if (showSortSheet) {
-                    ModalBottomSheet(
-                        onDismissRequest = { showSortSheet = false },
-                        containerColor = colors.onSurfaceVariant,
-                        dragHandle = { BottomSheetDefaults.DragHandle(color = colors.onSurfaceVariant) }
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp)
-                        ) {
-                            Text(
-                                text = "Sort By",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = colors.onBackground
-                                ),
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                            )
-                            HorizontalDivider(color = colors.onBackground.copy(alpha = 0.2f))
 
-                            SortOptionItem("Date Watched", SortOption.DATE_WATCHED, currentSort) {
-                                screenModel.updateSort(SortOption.DATE_WATCHED)
-                                showSortSheet = false
-                            }
-                            SortOptionItem("Release Year", SortOption.RELEASE_YEAR, currentSort) {
-                                screenModel.updateSort(SortOption.RELEASE_YEAR)
-                                showSortSheet = false
-                            }
-                            SortOptionItem("Rating", SortOption.RATING, currentSort) {
-                                screenModel.updateSort(SortOption.RATING)
-                                showSortSheet = false
-                            }
-                            SortOptionItem("Name", SortOption.NAME, currentSort) {
-                                screenModel.updateSort(SortOption.NAME)
-                                showSortSheet = false
-                            }
-
-                            HorizontalDivider(
-                                color = colors.onBackground.copy(alpha = 0.2f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Ascending Order", color = colors.onBackground, fontSize = 16.sp)
-                                Switch(
-                                    checked = isAscending,
-                                    onCheckedChange = {
-                                        screenModel.toggleAscending(it)
-                                        showSortSheet = false
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = colors.scrim,
-                                        checkedTrackColor = colors.scrim.copy(alpha = 0.5f)
-                                    )
-                                )
-                            }
-                        }
-                    }
-                }
             }
         }
 
@@ -332,7 +517,7 @@ data class MovieCollectionScreen(
             Icon(
                 imageVector = if (isSelected) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked,
                 contentDescription = null,
-                tint = if (isSelected) colors.scrim else colors.onSurfaceVariant
+                tint = if (isSelected) colors.background else colors.onSecondary
             )
             Spacer(modifier = Modifier.width(16.dp))
             Text(

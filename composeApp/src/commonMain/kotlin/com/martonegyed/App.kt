@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -13,7 +14,7 @@ import androidx.compose.ui.Modifier
 import cafe.adriel.voyager.navigator.Navigator
 import cafe.adriel.voyager.transitions.SlideTransition
 import com.martonegyed.di.appModule
-import com.martonegyed.presentation.CineGraphTheme
+import com.martonegyed.core.ui.CineGraphTheme
 import org.koin.compose.KoinApplication
 import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.data.local.database.DatabaseDriverFactory
@@ -54,7 +55,7 @@ fun App(driverFactory: DatabaseDriverFactory) {
                 modifier = Modifier
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing),
-                color = androidx.compose.material3.MaterialTheme.colorScheme.background
+                color = MaterialTheme.colorScheme.background
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     Navigator(screen = ImportScreen()) { navigator ->

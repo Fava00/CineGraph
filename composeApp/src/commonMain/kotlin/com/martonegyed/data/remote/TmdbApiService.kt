@@ -85,6 +85,7 @@ data class TmdbReview(
     val author: String = "",
     val content: String = ""
 )
+
 @Serializable
 data class TmdbVideosResponse(val results: List<TmdbVideo> = emptyList())
 
@@ -95,6 +96,7 @@ data class TmdbVideo(
     val type: String,
     val official: Boolean = false
 )
+
 @Serializable
 data class TmdbReleaseDatesResponse(val results: List<TmdbReleaseDateCountry> = emptyList())
 
@@ -169,6 +171,32 @@ data class TmdbMovieDetailsResponse(
             ?.data?.title?.takeIf { it.isNotEmpty() }
 }
 
+@Serializable
+data class TmdbPerson(
+    val id: Int,
+    val name: String,
+    @SerialName("profile_path") val profilePath: String? = null,
+    @SerialName("known_for_department") val knownForDepartment: String? = null
+)
+
+@Serializable
+data class TmdbPersonSearchResponse(
+    val results: List<TmdbPerson> = emptyList()
+)
+
+@Serializable
+data class TmdbGenreListResponse(
+    val genres: List<TmdbGenre> = emptyList()
+)
+
+@Serializable
+data class TmdbDiscoverMovieResponse(
+    val page: Int = 1,
+    val results: List<TmdbMovie> = emptyList(),
+    @SerialName("total_pages") val totalPages: Int = 1,
+    @SerialName("total_results") val totalResults: Int = 0
+)
+
 
 class TmdbApiService(private val client: HttpClient) {
 
@@ -209,6 +237,67 @@ class TmdbApiService(private val client: HttpClient) {
             }.body()
         } catch (e: Exception) {
             println("TMDB Details Error: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun searchPerson(query: String): TmdbPersonSearchResponse? {
+        return try {
+            client.get("$baseUrl/search/person") {
+                parameter("api_key", apiKey)
+                parameter("query", query)
+                parameter("include_adult", false)
+            }.body()
+        } catch (e: Exception) {
+            println("TMDB Person Search Error: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun getMovieGenres(): TmdbGenreListResponse? {
+        return try {
+            client.get("$baseUrl/genre/movie/list") {
+                parameter("api_key", apiKey)
+            }.body()
+        } catch (e: Exception) {
+            println("TMDB Genre List Error: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun discoverMovies(
+        castIds: List<Int>,
+        crewIds: List<Int>,
+        genreIds: List<Int>,
+        fromYear: Int?,
+        toYear: Int?,
+        page: Int = 1
+    ): TmdbDiscoverMovieResponse? {
+        return try {
+            client.get("$baseUrl/discover/movie") {
+                parameter("api_key", apiKey)
+                parameter("include_adult", false)
+                parameter("include_video", false)
+                parameter("sort_by", "popularity.desc")
+                parameter("page", page)
+
+                if (castIds.isNotEmpty()) {
+                    parameter("with_cast", castIds.joinToString(","))
+                }
+
+                if (crewIds.isNotEmpty()) {
+                    parameter("with_crew", crewIds.joinToString(","))
+                }
+
+                if (genreIds.isNotEmpty()) {
+                    parameter("with_genres", genreIds.joinToString("|"))
+                }
+
+                fromYear?.let { parameter("primary_release_date.gte", "$it-01-01") }
+                toYear?.let { parameter("primary_release_date.lte", "$it-12-31") }
+            }.body()
+        } catch (e: Exception) {
+            println("TMDB Discover Error: ${e.message}")
             null
         }
     }
