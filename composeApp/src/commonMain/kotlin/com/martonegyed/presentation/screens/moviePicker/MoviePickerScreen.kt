@@ -1,6 +1,5 @@
 package com.martonegyed.presentation.screens.moviePicker
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +22,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,7 +32,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -45,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -63,6 +66,8 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import com.martonegyed.core.ui.adaptive.AdaptiveLayout
 import com.martonegyed.core.util.roundToDecimals
 import com.martonegyed.data.remote.TmdbGenre
+import com.martonegyed.presentation.components.common.AppDrawer
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 data class MoviePickerScreen(
@@ -78,194 +83,193 @@ data class MoviePickerScreen(
         val uiState by screenModel.uiState.collectAsState()
         val snackbarHostState = remember { SnackbarHostState() }
         val scope = rememberCoroutineScope()
+        val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
-        Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            topBar = {
-                TopAppBar(
-                    title = { Text("Movie Picker") },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = {
-                                if (showBackButton) navigator.pop()
-                            }
-                        ) {
-                            Icon(
-                                imageVector = if (showBackButton) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Menu,
-                                contentDescription = if (showBackButton) "Back" else "Menu"
-                            )
-                        }
-                    },
-                    actions = {
-                        IconButton(
-                            onClick = {
-                                navigator.push(DiscoveryManagerPlaceholderScreen())
-                            }
-                        ) {
-                            Icon(Icons.Default.Tune, contentDescription = "Discovery Manager")
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = colors.background
-                    )
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                AppDrawer(
+                    navigator = navigator,
+                    currentScreen = this@MoviePickerScreen,
+                    closeDrawer = {
+                        scope.launch { drawerState.close() }
+                    }
                 )
             },
-            bottomBar = {
-                Surface(
-                    color = colors.background,
-                    tonalElevation = 6.dp
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 12.dp)
+            gesturesEnabled = !showBackButton
+        ) {
+            Scaffold(
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+                topBar = {
+                    TopAppBar(
+                        title = { Text("Movie Picker") },
+                        navigationIcon = {
+                            IconButton(
+                                onClick = {
+                                    if (showBackButton) {
+                                        navigator.pop()
+                                    } else {
+                                        scope.launch { drawerState.open() }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = if (showBackButton) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Menu,
+                                    contentDescription = if (showBackButton) "Back" else "Menu"
+                                )
+                            }
+                        },
+                        actions = {
+                            IconButton(
+                                onClick = { navigator.push(DiscoveryManagerScreen()) }
+                            ) {
+                                Icon(Icons.Default.Tune, contentDescription = "Discovery Manager")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = colors.background
+                        )
+                    )
+                },
+                bottomBar = {
+                    Surface(
+                        color = colors.background,
+                        tonalElevation = 6.dp
                     ) {
-                        Button(
-                            onClick = {
-                                navigator.push(MoviePickerResultsScreen(screenModel.buildRequest()))
-                            },
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(54.dp),
-                            shape = MaterialTheme.shapes.medium,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF00E054),
-                                contentColor = Color.Black
-                            )
+                                .padding(horizontal = 12.dp, vertical = 12.dp)
                         ) {
-                            Text("Find Movies", fontWeight = FontWeight.Bold)
+                            Button(
+                                onClick = {
+                                    navigator.push(MoviePickerResultsScreen(screenModel.buildRequest()))
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(54.dp),
+                                shape = MaterialTheme.shapes.medium,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF00E054),
+                                    contentColor = Color.Black
+                                )
+                            ) {
+                                Text("Find Movies", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
-            }
-        ) { padding ->
-            AdaptiveLayout(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .background(Color(0xFF14181C))
-            ) { adaptive ->
-                val scaffold = adaptive.tokens.scaffold
-                val compact = adaptive.window.isCompact
+            ) { padding ->
+                AdaptiveLayout(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .background(Color(0xFF14181C))
+                ) { adaptive ->
+                    val scaffold = adaptive.tokens.scaffold
+                    val compact = adaptive.window.isCompact
 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        horizontal = if (compact) 12.dp else scaffold.horizontalPadding,
-                        vertical = if (compact) 10.dp else scaffold.verticalPadding
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(if (compact) 16.dp else scaffold.sectionSpacing)
-                ) {
-                    item { SectionTitle("Search source") }
-                    item {
-                        SearchSourceChooser(
-                            selected = uiState.source,
-                            onSelected = screenModel::setSource
-                        )
-                    }
-
-                    if (uiState.needsSearchDepth) {
-                        item { SectionTitle("Search depth") }
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            horizontal = if (compact) 12.dp else scaffold.horizontalPadding,
+                            vertical = if (compact) 10.dp else scaffold.verticalPadding
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(if (compact) 16.dp else scaffold.sectionSpacing)
+                    ) {
+                        item { SectionTitle("Search source") }
                         item {
-                            SearchDepthSection(
-                                searchDepth = uiState.searchDepth,
-                                onDepthChange = screenModel::setSearchDepth
+                            SearchSourceChooser(
+                                selected = uiState.source,
+                                onSelected = screenModel::setSource
                             )
                         }
-                    }
 
-                    item { Divider(colors) }
-                    item { SectionTitle("I want to watch…") }
-                    item {
-                        WatchIntentChooser(
-                            selected = uiState.watchIntent,
-                            onSelected = screenModel::setWatchIntent
-                        )
-                    }
-
-                    item { Divider(colors) }
-                    item { SectionTitle("Genres") }
-                    item {
-                        if (uiState.isLoadingMeta && uiState.availableGenres.isEmpty()) {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        } else {
-                            GenreChooser(
-                                genres = uiState.availableGenres,
-                                states = uiState.genreStates,
-                                onGenreTap = screenModel::cycleGenre
-                            )
+                        if (uiState.needsSearchDepth) {
+                            item { SectionTitle("Search depth") }
+                            item {
+                                SearchDepthSection(
+                                    searchDepth = uiState.searchDepth,
+                                    etaText = uiState.searchDepthEtaText,
+                                    onDepthChange = screenModel::setSearchDepth
+                                )
+                            }
                         }
-                    }
 
-                    item { Divider(colors) }
-                    item { SectionTitle("Runtime") }
-                    item {
-                        RuntimeChooser(
-                            range = uiState.runtimeRange,
-                            onRangeChange = screenModel::updateRuntime
-                        )
-                    }
-
-                    item { Divider(colors) }
-                    item { SectionTitle("Minimum rating") }
-                    item {
-                        MinimumRatingChooser(
-                            rating = uiState.minimumRating,
-                            onRatingChange = screenModel::updateMinimumRating
-                        )
-                    }
-
-                    item { Divider(colors) }
-                    item { SectionTitle("Decades") }
-                    item {
-                        DecadesChooser(
-                            decades = uiState.decades,
-                            selectedDecades = uiState.selectedDecades,
-                            onDecadeTap = screenModel::toggleDecade
-                        )
-                    }
-
-                    item { Divider(colors) }
-                    item { SectionTitle("Languages") }
-                    item {
-                        MultiSelectDropdownSection(
-                            label = "Languages",
-                            options = uiState.availableLanguages,
-                            selectedValues = uiState.selectedLanguages,
-                            onToggle = screenModel::toggleLanguage
-                        )
-                    }
-
-                    item { Divider(colors) }
-                    item { SectionTitle("Production countries") }
-                    item {
-                        MultiSelectDropdownSection(
-                            label = "Production countries",
-                            options = uiState.availableCountries,
-                            selectedValues = uiState.selectedCountries,
-                            onToggle = screenModel::toggleCountry
-                        )
-                    }
-
-                    item {
-                        Text(
-                            text = "TMDb-side filtering should use original language and production country filters first, then local filtering should re-check cached and library items once full movie details are present.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-
-                    uiState.errorMessage?.let { message ->
+                        item { Divider(colors) }
+                        item { SectionTitle("I want to watch…") }
                         item {
-                            Text(
-                                text = message,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodyMedium
+                            WatchIntentChooser(
+                                selected = uiState.watchIntent,
+                                onSelected = screenModel::setWatchIntent
                             )
                         }
-                    }
 
-                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                        item { Divider(colors) }
+                        item { SectionTitle("Genres") }
+                        item {
+                            if (uiState.isLoadingMeta && uiState.availableGenres.isEmpty()) {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            } else {
+                                GenreChooser(
+                                    genres = uiState.availableGenres,
+                                    states = uiState.genreStates,
+                                    onGenreTap = screenModel::cycleGenre
+                                )
+                            }
+                        }
+
+                        item { Divider(colors) }
+                        item { SectionTitle("Runtime") }
+                        item {
+                            RuntimeChooser(
+                                range = uiState.runtimeRange,
+                                onRangeChange = screenModel::updateRuntime
+                            )
+                        }
+
+                        item { Divider(colors) }
+                        item { SectionTitle("Minimum rating") }
+                        item {
+                            MinimumRatingChooser(
+                                rating = uiState.minimumRating,
+                                onRatingChange = screenModel::updateMinimumRating
+                            )
+                        }
+
+                        item { Divider(colors) }
+                        item { SectionTitle("Decades") }
+                        item {
+                            DecadesChooser(
+                                decades = uiState.decades,
+                                selectedDecades = uiState.selectedDecades,
+                                onDecadeTap = screenModel::toggleDecade
+                            )
+                        }
+
+                        item { Divider(colors) }
+                        item { SectionTitle("Languages") }
+                        item {
+                            MultiSelectDropdownSection(
+                                label = "Languages",
+                                options = uiState.availableLanguages,
+                                selectedValues = uiState.selectedLanguages,
+                                onToggle = screenModel::toggleLanguage
+                            )
+                        }
+
+                        uiState.errorMessage?.let { message ->
+                            item {
+                                Text(
+                                    text = message,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+
+                        item { Spacer(modifier = Modifier.height(8.dp)) }
+                    }
                 }
             }
         }
@@ -336,6 +340,7 @@ private fun WatchIntentChooser(
 @Composable
 private fun SearchDepthSection(
     searchDepth: Int,
+    etaText: String,
     onDepthChange: (Int) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -361,6 +366,11 @@ private fun SearchDepthSection(
             onValueChange = { onDepthChange(it.roundToInt()) },
             valueRange = 20f..500f,
             steps = 23
+        )
+        Text(
+            text = "Approximate query time: $etaText",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -497,7 +507,6 @@ private fun TriStateChip(
     )
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MultiSelectDropdownSection(
     label: String,
@@ -506,7 +515,11 @@ private fun MultiSelectDropdownSection(
     onToggle: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val selectedLabels = options.filter { it.code in selectedValues }.map { it.label }
+
+    val selectedLabels = options
+        .filter { it.code in selectedValues }
+        .map { it.label }
+
     val summary = when {
         selectedLabels.isEmpty() -> "Any"
         selectedLabels.size <= 2 -> selectedLabels.joinToString()
@@ -514,31 +527,58 @@ private fun MultiSelectDropdownSection(
     }
 
     Box(modifier = Modifier.fillMaxWidth()) {
-        OutlinedTextField(
-            value = summary,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text(label) },
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { expanded = true },
-            trailingIcon = {
-                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-            }
-        )
+                .clickable { expanded = true }
+        ) {
+            OutlinedTextField(
+                value = summary,
+                onValueChange = {},
+                readOnly = true,
+                enabled = false,
+                label = { Text(label) },
+                modifier = Modifier.fillMaxWidth(),
+                trailingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.ArrowDropDown,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    focusedLabelColor = MaterialTheme.colorScheme.primary,
+                    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                    focusedTrailingIconColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            )
+        }
 
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            modifier = Modifier.fillMaxWidth(0.94f)
+            modifier = Modifier.fillMaxWidth(0.94f),
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         ) {
             options.forEach { option ->
                 val selected = option.code in selectedValues
                 DropdownMenuItem(
                     text = {
-                        Text(if (selected) "✓ ${option.label}" else option.label)
+                        Text(
+                            if (selected) "✓ ${option.label}" else option.label,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     },
-                    onClick = { onToggle(option.code) }
+                    onClick = {
+                        onToggle(option.code)
+                    }
                 )
             }
         }
@@ -547,84 +587,4 @@ private fun MultiSelectDropdownSection(
 
 private fun formatRuntime(minutes: Int): String {
     return if (minutes >= 240) "240+ min" else "$minutes min"
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-data class DiscoveryManagerPlaceholderScreen(
-    val showBackButton: Boolean = true
-) : Screen {
-    @Composable
-    override fun Content() {
-        val navigator = LocalNavigator.currentOrThrow
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Discovery Manager") },
-                    navigationIcon = {
-                        IconButton(onClick = { navigator.pop() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    }
-                )
-            }
-        ) { padding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = androidx.compose.ui.Alignment.Center
-            ) {
-                Text("Discovery Manager screen placeholder")
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-data class MoviePickerResultsPlaceholderScreen(
-    val request: MoviePickerRequest,
-    val showBackButton: Boolean = true
-) : Screen {
-    @Composable
-    override fun Content() {
-        val navigator = LocalNavigator.currentOrThrow
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Movie Picker Results") },
-                    navigationIcon = {
-                        IconButton(onClick = { navigator.pop() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    }
-                )
-            }
-        ) { padding ->
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .background(Color(0xFF14181C)),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                item { Text("Request handoff works", color = Color.White, fontWeight = FontWeight.Bold) }
-                item { Text("Source: ${request.source}", color = Color.White) }
-                item { Text("Depth: ${request.searchDepth}", color = Color.White) }
-                item { Text("Intent: ${request.watchIntent}", color = Color.White) }
-                item { Text("Included genres: ${request.includedGenreIds}", color = Color.White) }
-                item { Text("Excluded genres: ${request.excludedGenreIds}", color = Color.White) }
-                item {
-                    Text(
-                        "Runtime: ${request.runtimeMinutes.first}-${request.runtimeMinutes.last}",
-                        color = Color.White
-                    )
-                }
-                item { Text("Minimum rating: ${request.minimumRating}", color = Color.White) }
-                item { Text("Decades: ${request.selectedDecades}", color = Color.White) }
-                item { Text("Languages: ${request.languages}", color = Color.White) }
-                item { Text("Countries: ${request.productionCountries}", color = Color.White) }
-            }
-        }
-    }
 }

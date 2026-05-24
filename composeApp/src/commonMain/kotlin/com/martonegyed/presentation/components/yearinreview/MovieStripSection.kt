@@ -21,7 +21,7 @@ import com.martonegyed.presentation.components.common.cards.MovieCard
 fun MovieStripSection(
     movies: List<Movie>,
     showTmdbBadge: Boolean = false,
-    onMovieClick: (Long) -> Unit = {}
+    onMovieClick: (Movie) -> Unit = {}
 ) {
     HorizontalRow(items = movies, key = { it.id }) { movie ->
         Box(modifier = Modifier.width(132.dp)) {
@@ -37,7 +37,7 @@ fun MovieStripSection(
                 ),
                 showRating = !showTmdbBadge,
                 posterMaxWidth = 116.dp,
-                onTap = { onMovieClick(movie.id.toLong()) }
+                onTap = { onMovieClick(movie) }
             )
 
             if (showTmdbBadge) {

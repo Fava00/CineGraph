@@ -2,6 +2,9 @@ package com.martonegyed.presentation.analytics
 
 import com.martonegyed.domain.model.Movie
 import com.martonegyed.domain.model.Person
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 
 object AnalyticsMovieMappers {
 
@@ -83,9 +86,9 @@ object AnalyticsMovieMappers {
             runtimeMinutes = runtimeMinutes?.toInt(),
             originalLanguage = originalLanguage,
             revenue = revenue,
-            genres = genres?.split(", ")?.filter { it.isNotBlank() },
-            studios = studios?.split(", ")?.filter { it.isNotBlank() },
-            productionCountries = productionCountries?.split(", ")?.filter { it.isNotBlank() },
+            genres =  decodeStringList(genres),
+            studios =  decodeStringList(studios),
+            productionCountries = decodeStringList(productionCountries),
             actors = persons.filter { it.job == "Actor" }.map {
                 Person(name = it.name, profilePath = it.profilePath)
             },
@@ -94,5 +97,17 @@ object AnalyticsMovieMappers {
             },
             letterboxdUri = letterboxdUri
         )
+    }
+}
+
+private fun decodeStringList(raw: String?): List<String>? {
+    if (raw.isNullOrBlank()) return null
+
+    return runCatching {
+        Json.decodeFromString(ListSerializer(String.serializer()), raw)
+    }.getOrElse {
+        raw.split(",")
+            .map { it.trim().trim('"', '[', ']') }
+            .filter { it.isNotBlank() }
     }
 }

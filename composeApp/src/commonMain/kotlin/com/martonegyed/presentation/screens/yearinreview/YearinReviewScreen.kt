@@ -33,6 +33,7 @@ import com.martonegyed.presentation.components.yearinreview.RankingSection
 import com.martonegyed.presentation.components.yearinreview.WeekBarSection
 import com.martonegyed.presentation.components.yearinreview.WeekdayBarSection
 import com.martonegyed.presentation.components.yearinreview.YearInReviewSelector
+import com.martonegyed.presentation.screens.details.MovieDetailScreen
 import com.martonegyed.presentation.screens.insights.sections.MapInsightSection
 import kotlinx.coroutines.launch
 
@@ -152,8 +153,9 @@ class YearInReviewScreen : Screen {
                             item {
                                 SectionCard(title = "Your highest rated") {
                                     MovieStripSection(
+                                        movies = uiState.highestRatedByUser,
+                                        onMovieClick = { movie -> navigator.push(MovieDetailScreen(movie)) }
 
-                                        movies = uiState.highestRatedByUser
                                     )
                                 }
                             }
@@ -162,7 +164,9 @@ class YearInReviewScreen : Screen {
                                 SectionCard(title = "Highest rated on TMDB") {
                                     MovieStripSection(
                                         movies = uiState.highestRatedByTmdb,
-                                        showTmdbBadge = true
+                                        showTmdbBadge = true,
+                                        onMovieClick = { movie -> navigator.push(MovieDetailScreen(movie)) }
+
                                     )
                                 }
                             }
@@ -171,7 +175,8 @@ class YearInReviewScreen : Screen {
                                 SectionCard(title = "Lowest rated on TMDB") {
                                     MovieStripSection(
                                         movies = uiState.lowestRatedByTmdb,
-                                        showTmdbBadge = true
+                                        showTmdbBadge = true,
+                                        onMovieClick = { movie -> navigator.push(MovieDetailScreen(movie)) }
                                     )
                                 }
                             }
@@ -194,14 +199,20 @@ class YearInReviewScreen : Screen {
 
                             item {
                                 if (uiState.firstMovie != null || uiState.lastMovie != null) {
-                                    FirstLastMovieSection(uiState.firstMovie!!, uiState.lastMovie!!)
+                                    FirstLastMovieSection(
+                                        firstMovie = uiState.firstMovie,
+                                        lastMovie = uiState.lastMovie,
+                                        onMovieClick = { movie -> navigator.push(MovieDetailScreen(movie)) }
+                                    )
                                 }
                             }
 
                             item {
                                 if (uiState.milestones.isNotEmpty()) {
                                     SectionCard(title = "Milestones") {
-                                        MilestonesSection(rows = uiState.milestones)
+                                        MilestonesSection(
+                                            rows = uiState.milestones,
+                                            onMovieClick = { movie -> navigator.push(MovieDetailScreen(movie)) })
                                     }
                                 }
                             }

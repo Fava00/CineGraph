@@ -31,7 +31,7 @@ enum class CollectionType(val title: String) {
     BY_DECADE("Movies in this decade"),
     BY_RATING("Movies with this rating"),
     BY_DUO("Movies with this Duo"),
-    //CACHED("Cached Movies") TODO
+    CACHED("Cached Movies")
 }
 
 data class MovieCollectionRow(
@@ -72,7 +72,7 @@ class MovieCollectionScreenModel(
     private sealed interface CollectionRequest {
         object Library : CollectionRequest
         object Watchlist : CollectionRequest
-        //object Cached : CollectionRequest
+        object Cached : CollectionRequest
 
         data class ByEntity(
             val entityType: StatEntityType,
@@ -148,7 +148,7 @@ class MovieCollectionScreenModel(
         val request = when (type) {
             LIBRARY -> CollectionRequest.Library
             WATCHLIST -> CollectionRequest.Watchlist
-            //CACHED -> CollectionRequest.Cached
+            CACHED -> CollectionRequest.Cached
             BY_DECADE, BY_ENTITY, BY_RATING, BY_DUO ->
                 error("Use the typed init function for $type")
         }
@@ -275,7 +275,7 @@ class MovieCollectionScreenModel(
         dbJob = screenModelScope.launch {
             when (val request = currentRequest) {
                 CollectionRequest.Library,
-                    //TODO: CollectionRequest.Cached,
+                CollectionRequest.Cached,
                 CollectionRequest.Watchlist -> observeReactiveCollection(request)
 
 
@@ -295,8 +295,8 @@ class MovieCollectionScreenModel(
             CollectionRequest.Watchlist ->
                 database.movieEntityQueries.getWatchlistCollectionRows(::mapCollectionRow)
 
-            //TODO CollectionRequest.Cached ->
-            //    database.movieEntityQueries.getCachedCollectionRows(::mapCollectionRow)
+            CollectionRequest.Cached ->
+            database.movieEntityQueries.getCachedCollectionRows(::mapCollectionRow)
 
             else -> error("Reactive loader called with non-reactive request: $request")
         }

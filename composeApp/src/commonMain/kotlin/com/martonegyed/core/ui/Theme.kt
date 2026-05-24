@@ -7,8 +7,7 @@ import androidx.compose.ui.graphics.Color
 
 val CineBackground = Color(0xFF0E1014)
 val CineSurface = Color(0xFF1A1D23)
-
-val CineSurfaceContainer = Color(0xFFF0F0F0)
+val CineSurfaceContainer = Color(0xFF1F232A)
 val CineSurfaceVariant = Color(0xFF252930)
 val CinePrimary = Color(0xFFE8A030)
 val CinePrimaryContainer = Color(0xFFF8E100)

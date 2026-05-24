@@ -33,12 +33,11 @@ import com.martonegyed.presentation.components.common.SkeletonCard
 import com.martonegyed.presentation.components.common.cards.SectionCard
 import com.martonegyed.presentation.components.insights.WorldCountriesMap
 import com.martonegyed.presentation.components.insights.WorldMapCountryVisual
+import com.martonegyed.presentation.components.insights.countryAlpha2Code
 import com.martonegyed.presentation.components.insights.countryFlagEmoji
-import com.martonegyed.presentation.components.insights.normalizeCountryName
 import com.martonegyed.presentation.screens.movies.CollectionType
 import com.martonegyed.presentation.screens.movies.MovieCollectionScreen
 import com.martonegyed.presentation.screens.statistics.StatEntityType
-
 
 @Composable
 fun MapInsightSection(
@@ -59,13 +58,15 @@ fun MapInsightSection(
     val colors = MaterialTheme.colorScheme
     val topCountry = rows.firstOrNull()
     val maxCount = rows.maxOfOrNull { it.count }?.coerceAtLeast(1) ?: 1
+
     val countryVisuals = remember(rows, colors) {
         buildCountryVisuals(
-            rows,
-            colors.primary,
-            colors.surfaceVariant
+            rows = rows,
+            highlightColor = colors.primary,
+            baseColor = colors.surfaceVariant
         )
     }
+
     var selectedCountry by remember(rows) { mutableStateOf<WorldMapCountryVisual?>(null) }
 
     SectionCard(
@@ -127,7 +128,11 @@ fun MapInsightSection(
                                 fontSize = 15.sp
                             )
                             Text(
-                                text = if (country.count == 1) "Tap to open 1 film" else "Tap to open ${country.count} films",
+                                text = if (country.count == 1) {
+                                    "Tap to open 1 film"
+                                } else {
+                                    "Tap to open ${country.count} films"
+                                },
                                 color = colors.onSurfaceVariant,
                                 fontSize = 13.sp
                             )
@@ -293,15 +298,38 @@ private fun buildCountryVisuals(
     highlightColor: Color,
     baseColor: Color
 ): List<WorldMapCountryVisual> {
-    val sortedRows = rows.sortedByDescending { it.count }
-    val totalItems = sortedRows.size.coerceAtLeast(1)
+    val mergedRows = rows
+        .mapNotNull { row ->
+            countryAlpha2Code(row.name)?.uppercase()?.let { alpha2 ->
+                alpha2 to row
+            }
+        }
+        .groupBy(
+            keySelector = { it.first },
+            valueTransform = { it.second }
+        )
+        .map { (alpha2Code, groupedRows) ->
+            val representativeName = preferredCountryDisplayName(
+                alpha2Code = alpha2Code,
+                fallback = groupedRows.maxByOrNull { it.count }?.name ?: alpha2Code
+            )
+
+            Triple(
+                alpha2Code,
+                representativeName,
+                groupedRows.sumOf { it.count }
+            )
+        }
+        .sortedByDescending { it.third }
+
+    val totalItems = mergedRows.size.coerceAtLeast(1)
     val distinctTopCount = 15
     val topZoneStart = 1.0f
     val topZoneEnd = 0.5f
     val tailZoneStart = 0.5f
     val tailZoneEnd = 0.2f
 
-    return sortedRows.mapIndexed { index, row ->
+    return mergedRows.mapIndexed { index, (alpha2Code, name, count) ->
         val intensity = when {
             totalItems <= distinctTopCount -> {
                 val progress = index.toFloat() / totalItems.toFloat()
@@ -321,11 +349,22 @@ private fun buildCountryVisuals(
         }.coerceIn(0.18f, 1.0f)
 
         WorldMapCountryVisual(
-            name = row.name,
-            normalizedName = normalizeCountryName(row.name),
-            count = row.count,
+            alpha2Code = alpha2Code,
+            name = name,
+            count = count,
             fillColor = lerpForLegend(baseColor, highlightColor, intensity)
         )
+    }
+}
+
+private fun preferredCountryDisplayName(
+    alpha2Code: String,
+    fallback: String
+): String {
+    return when (alpha2Code.uppercase()) {
+        "US" -> "United States"
+        "GB" -> "United Kingdom"
+        else -> fallback
     }
 }
 

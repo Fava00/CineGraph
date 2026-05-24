@@ -53,11 +53,19 @@ fun YearInReviewSelector(
 
         DropdownMenu(
             expanded = expanded,
-            onDismissRequest = { expanded = false }
+            onDismissRequest = { expanded = false },
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         ) {
             years.forEach { year ->
                 DropdownMenuItem(
-                    text = { Text("$year Year in Review") },
+                    text = {
+                        Text(
+                            text = "${selectedYear ?: ""} Year in Review".trim(),
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    },
                     onClick = {
                         expanded = false
                         onYearSelected(year)

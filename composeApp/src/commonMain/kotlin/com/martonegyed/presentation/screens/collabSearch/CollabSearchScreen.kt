@@ -38,6 +38,8 @@ import com.martonegyed.domain.model.SelectedPerson
 import com.martonegyed.domain.model.SuggestionSource
 import com.martonegyed.core.ui.adaptive.AdaptiveLayout
 import com.martonegyed.data.remote.TmdbGenre
+import com.martonegyed.presentation.components.common.AppDrawer
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 data class CollabSearchScreen(
@@ -52,213 +54,234 @@ data class CollabSearchScreen(
         val screenModel = koinScreenModel<CollabSearchScreenModel>()
         val uiState by screenModel.uiState.collectAsState()
 
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Advanced Discovery") },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = {
-                                if (showBackButton) navigator.pop()
-                            }
-                        ) {
-                            Icon(
-                                imageVector = if (showBackButton) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Menu,
-                                contentDescription = if (showBackButton) "Back" else "Menu"
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = colors.background
-                    )
+        val scope = rememberCoroutineScope()
+        val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
+
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            drawerContent = {
+                AppDrawer(
+                    navigator = navigator,
+                    currentScreen = this@CollabSearchScreen,
+                    closeDrawer = {
+                        scope.launch { drawerState.close() }
+                    }
                 )
             },
-            bottomBar = {
-                Surface(
-                    color = colors.background,
-                    tonalElevation = 6.dp
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 12.dp)
+            gesturesEnabled = !showBackButton
+        ) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("Advanced Discovery") },
+                        navigationIcon = {
+                            IconButton(
+                                onClick = {
+                                    if (showBackButton) navigator.pop()
+                                    else{
+                                        scope.launch { drawerState.open() }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = if (showBackButton) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Menu,
+                                    contentDescription = if (showBackButton) "Back" else "Menu"
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = colors.background
+                        )
+                    )
+                },
+                bottomBar = {
+                    Surface(
+                        color = colors.background,
+                        tonalElevation = 6.dp
                     ) {
-                        Button(
-                            onClick = { screenModel.search() },
-                            enabled = uiState.canSearch && !uiState.isSearching,
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(54.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF00E054),
-                                contentColor = Color.Black
-                            )
+                                .padding(horizontal = 12.dp, vertical = 12.dp)
                         ) {
-                            if (uiState.isSearching) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = Color.Black
+                            Button(
+                                onClick = { screenModel.search() },
+                                enabled = uiState.canSearch && !uiState.isSearching,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(54.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF00E054),
+                                    contentColor = Color.Black
                                 )
-                            } else {
-                                Text(
-                                    "SEARCH MOVIES",
-                                    fontWeight = FontWeight.Bold
-                                )
+                            ) {
+                                if (uiState.isSearching) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Color.Black
+                                    )
+                                } else {
+                                    Text(
+                                        "SEARCH MOVIES",
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
                 }
-            }
-        ) { padding ->
-            AdaptiveLayout(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .background(Color(0xFF14181c))
-            ) { adaptive ->
+            ) { padding ->
+                AdaptiveLayout(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .background(Color(0xFF14181c))
+                ) { adaptive ->
 
-                val scaffold = adaptive.tokens.scaffold
-                val compact = adaptive.window.isCompact
+                    val scaffold = adaptive.tokens.scaffold
+                    val compact = adaptive.window.isCompact
 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(
-                        horizontal = if (compact) 12.dp else scaffold.horizontalPadding,
-                        vertical = if (compact) 10.dp else scaffold.verticalPadding
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(if (compact) 16.dp else scaffold.sectionSpacing)
-                ) {
-                    item {
-                        FilterSectionTitle("Cast & Crew")
-                    }
-
-                    item {
-                        PersonInputSection(
-                            value = uiState.actorInput,
-                            placeholder = "Enter an Actor's name (e.g. Tom Cruise)",
-                            leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
-                            suggestions = uiState.actorSuggestions,
-                            expanded = uiState.showActorSuggestions,
-                            onValueChange = { screenModel.updateInput(PersonRole.ACTOR, it) },
-                            onAdd = { screenModel.addPerson(PersonRole.ACTOR) },
-                            onSuggestionClick = { screenModel.selectSuggestion(PersonRole.ACTOR, it) },
-                            onDismiss = { screenModel.dismissSuggestions(PersonRole.ACTOR) }
-                        )
-
-                    }
-
-                    if (uiState.selectedActors.isNotEmpty()) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            horizontal = if (compact) 12.dp else scaffold.horizontalPadding,
+                            vertical = if (compact) 10.dp else scaffold.verticalPadding
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(if (compact) 16.dp else scaffold.sectionSpacing)
+                    ) {
                         item {
-                            SelectedPeopleChips(
-                                items = uiState.selectedActors,
-                                onRemove = { screenModel.removePerson(PersonRole.ACTOR, it) }
-                            )
+                            FilterSectionTitle("Cast & Crew")
                         }
-                    }
 
-                    item {
-                        PersonInputSection(
-                            placeholder = "Enter a Director's name (e.g. David Lynch)",
-                            leadingIcon = { Icon(Icons.Default.Theaters, contentDescription = null) },
-                            value = uiState.directorInput,
-                            suggestions = uiState.directorSuggestions,
-                            expanded = uiState.showDirectorSuggestions,
-                            onValueChange = { screenModel.updateInput(PersonRole.DIRECTOR, it) },
-                            onAdd = { screenModel.addPerson(PersonRole.DIRECTOR) },
-                            onSuggestionClick = { screenModel.selectSuggestion(PersonRole.DIRECTOR, it) },
-                            onDismiss = { screenModel.dismissSuggestions(PersonRole.DIRECTOR) })
-                    }
-
-                    if (uiState.selectedDirectors.isNotEmpty()) {
                         item {
-                            SelectedPeopleChips(
-                                items = uiState.selectedDirectors,
-                                onRemove = { screenModel.removePerson(PersonRole.DIRECTOR, it) }
+                            PersonInputSection(
+                                value = uiState.actorInput,
+                                placeholder = "Enter an Actor's name (e.g. Tom Cruise)",
+                                leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+                                suggestions = uiState.actorSuggestions,
+                                expanded = uiState.showActorSuggestions,
+                                onValueChange = { screenModel.updateInput(PersonRole.ACTOR, it) },
+                                onAdd = { screenModel.addPerson(PersonRole.ACTOR) },
+                                onSuggestionClick = { screenModel.selectSuggestion(PersonRole.ACTOR, it) },
+                                onDismiss = { screenModel.dismissSuggestions(PersonRole.ACTOR) }
                             )
+
                         }
-                    }
 
-                    item {
-                        HorizontalDivider(color = colors.onSurface.copy(alpha = 0.12f))
-                    }
-
-                    item {
-                        FilterSectionTitle("Release Years")
-                    }
-
-                    item {
-                        ReleaseYearSection(
-                            minYear = uiState.minYear,
-                            maxYear = uiState.maxYear,
-                            selectedStartYear = uiState.selectedStartYear,
-                            selectedEndYear = uiState.selectedEndYear,
-                            onYearRangeChanged = screenModel::updateYearRange
-                        )
-                    }
-
-                    item {
-                        HorizontalDivider(color = colors.onSurface.copy(alpha = 0.12f))
-                    }
-
-                    item {
-                        FilterSectionTitle("Genres")
-                    }
-
-                    item {
-                        if (uiState.isLoadingGenres) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 12.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator()
+                        if (uiState.selectedActors.isNotEmpty()) {
+                            item {
+                                SelectedPeopleChips(
+                                    items = uiState.selectedActors,
+                                    onRemove = { screenModel.removePerson(PersonRole.ACTOR, it) }
+                                )
                             }
-                        } else {
-                            GenreSection(
-                                genres = uiState.availableGenres,
-                                selectedGenreIds = uiState.selectedGenreIds,
-                                onToggle = screenModel::toggleGenre
-                            )
                         }
-                    }
 
-                    uiState.errorMessage?.let { message ->
                         item {
-                            Text(
-                                text = message,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                            PersonInputSection(
+                                placeholder = "Enter a Director's name (e.g. David Lynch)",
+                                leadingIcon = { Icon(Icons.Default.Theaters, contentDescription = null) },
+                                value = uiState.directorInput,
+                                suggestions = uiState.directorSuggestions,
+                                expanded = uiState.showDirectorSuggestions,
+                                onValueChange = { screenModel.updateInput(PersonRole.DIRECTOR, it) },
+                                onAdd = { screenModel.addPerson(PersonRole.DIRECTOR) },
+                                onSuggestionClick = { screenModel.selectSuggestion(PersonRole.DIRECTOR, it) },
+                                onDismiss = { screenModel.dismissSuggestions(PersonRole.DIRECTOR) })
                         }
-                    }
 
-                    if (uiState.results.isNotEmpty()) {
+                        if (uiState.selectedDirectors.isNotEmpty()) {
+                            item {
+                                SelectedPeopleChips(
+                                    items = uiState.selectedDirectors,
+                                    onRemove = { screenModel.removePerson(PersonRole.DIRECTOR, it) }
+                                )
+                            }
+                        }
+
                         item {
                             HorizontalDivider(color = colors.onSurface.copy(alpha = 0.12f))
                         }
 
                         item {
-                            Text(
-                                text = "${uiState.results.size} results",
-                                color = colors.onSurface,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
+                            FilterSectionTitle("Release Years")
+                        }
+
+                        item {
+                            ReleaseYearSection(
+                                minYear = uiState.minYear,
+                                maxYear = uiState.maxYear,
+                                selectedStartYear = uiState.selectedStartYear,
+                                selectedEndYear = uiState.selectedEndYear,
+                                onYearRangeChanged = screenModel::updateYearRange
                             )
                         }
 
                         item {
-                            DiscoveryResultsGrid(
-                                movies = uiState.results,
-                                compact = compact
-                            )
+                            HorizontalDivider(color = colors.onSurface.copy(alpha = 0.12f))
                         }
-                    }
 
-                    item {
-                        Spacer(modifier = Modifier.height(8.dp))
+                        item {
+                            FilterSectionTitle("Genres")
+                        }
+
+                        item {
+                            if (uiState.isLoadingGenres) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 12.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator()
+                                }
+                            } else {
+                                GenreSection(
+                                    genres = uiState.availableGenres,
+                                    selectedGenreIds = uiState.selectedGenreIds,
+                                    onToggle = screenModel::toggleGenre
+                                )
+                            }
+                        }
+
+                        uiState.errorMessage?.let { message ->
+                            item {
+                                Text(
+                                    text = message,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+
+                        if (uiState.results.isNotEmpty()) {
+                            item {
+                                HorizontalDivider(color = colors.onSurface.copy(alpha = 0.12f))
+                            }
+
+                            item {
+                                Text(
+                                    text = "${uiState.results.size} results",
+                                    color = colors.onSurface,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            item {
+                                DiscoveryResultsGrid(
+                                    movies = uiState.results,
+                                    compact = compact
+                                )
+                            }
+                        }
+
+                        item {
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
                     }
                 }
             }

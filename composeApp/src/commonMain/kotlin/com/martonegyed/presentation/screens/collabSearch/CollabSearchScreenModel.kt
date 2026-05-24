@@ -366,10 +366,10 @@ class CollabSearchScreenModel(
                     val response = tmdbApiService.discoverMovies(
                         castIds = actorPeople.map { it.id },
                         crewIds = directorPeople.map { it.id },
-                        genreIds = selectedGenres,
+                        includedGenreIds = selectedGenres,
                         fromYear = _uiState.value.selectedStartYear,
                         toYear = _uiState.value.selectedEndYear,
-                        page = page
+                        page = page,
                     ) ?: continue
 
                     if (response.results.isEmpty()) break

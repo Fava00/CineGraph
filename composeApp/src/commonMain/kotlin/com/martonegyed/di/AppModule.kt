@@ -3,6 +3,7 @@ package com.martonegyed.di
 import com.martonegyed.data.local.DataSyncManager
 import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.data.local.CsvImportService
+import com.martonegyed.data.local.SqlDelightDiscoveryManagerRepository
 import com.martonegyed.data.remote.TmdbApiService
 import com.martonegyed.presentation.analytics.AnalyticsRepository
 import com.martonegyed.presentation.screens.collabSearch.CollabSearchScreenModel
@@ -10,6 +11,9 @@ import com.martonegyed.presentation.screens.calendar.CalendarScreenModel
 import com.martonegyed.presentation.screens.details.MovieDetailScreenModel
 import com.martonegyed.presentation.screens.import.ImportScreenModel
 import com.martonegyed.presentation.screens.insights.InsightsScreenModel
+import com.martonegyed.presentation.screens.moviePicker.DiscoveryManagerRepository
+import com.martonegyed.presentation.screens.moviePicker.DiscoveryManagerScreenModel
+import com.martonegyed.presentation.screens.moviePicker.MoviePickerRequest
 import com.martonegyed.presentation.screens.moviePicker.MoviePickerResultsScreenModel
 import com.martonegyed.presentation.screens.moviePicker.MoviePickerScreenModel
 import com.martonegyed.presentation.screens.movies.MovieCollectionScreenModel
@@ -41,6 +45,9 @@ val appModule = module {
     single { TmdbApiService(get()) }
     single { DataSyncManager(get(), get()) }
     single { AnalyticsRepository(get()) }
+    single<DiscoveryManagerRepository> {
+        SqlDelightDiscoveryManagerRepository(get())
+    }
 
 
     factory { ImportScreenModel(get(), get(), get(), get()) }
@@ -52,6 +59,11 @@ val appModule = module {
     factory { CollabSearchScreenModel(get(), get()) }
     factory { YearInReviewScreenModel(get()) }
     factory { RandomPickerScreenModel(get()) }
-    factory { MoviePickerScreenModel(get(), get()) }
-    factory { MoviePickerResultsScreenModel(get(), get(), get()) }
+    factory { MoviePickerScreenModel(get()) }
+    factory { (request: MoviePickerRequest) ->
+        MoviePickerResultsScreenModel(request, get(), get(), get())
+    }
+    factory {
+        DiscoveryManagerScreenModel(repository = get())
+    }
 }

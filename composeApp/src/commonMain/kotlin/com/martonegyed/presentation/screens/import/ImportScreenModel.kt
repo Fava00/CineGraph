@@ -263,9 +263,9 @@ class ImportScreenModel(
                 SyncState.Loading("Adding $actuallyNew new movies and updating existing ones...")
             }
 
+            dataSyncManager.startImportAndEnrich(stagedMovies = stagedSnapshot)
             clearStaged()
             reset()
-            dataSyncManager.startImportAndEnrich(stagedMovies = stagedSnapshot)
         }
     }
 

@@ -2,6 +2,8 @@ package com.martonegyed.data.local
 
 import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.data.remote.TmdbApiService
+import com.martonegyed.data.remote.TmdbMovieDetailsResponse
+import com.martonegyed.domain.model.SimilarMovie
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -38,6 +40,30 @@ class DataSyncManager(
 
     val resumePromptShown = MutableStateFlow(false)
 
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
+    /*private fun mapSimilarMovies(details: MovieDetailsDto): List<SimilarMovie>? {
+        return details.similar?.results
+            ?.take(10)
+            ?.map { t ->
+                SimilarMovie(
+                    tmdbId = t.id,
+                    name = t.title,
+                    year = t.releaseDate?.take(4)?.toIntOrNull(),
+                    posterPath = t.posterPath,
+                    originalTitle = t.originalTitle,
+                    originalLanguage = t.originalLanguage,
+                    backdropPath = t.backdropPath,
+                    overview = t.overview,
+                    tmdbVoteAverage = t.voteAverage,
+                    tmdbVoteCount = t.voteCount
+                )
+            }
+            ?.takeIf { it.isNotEmpty() }
+    }*/
 
 
     fun startImportAndEnrich(stagedMovies: List<Map<String, Any?>>) {
@@ -291,6 +317,26 @@ class DataSyncManager(
         }
     }
 
+    private fun mapSimilarMovies(details: TmdbMovieDetailsResponse): List<SimilarMovie>? {
+        return details.similar?.results
+            ?.take(10)
+            ?.map { t ->
+                SimilarMovie(
+                    tmdbId = t.id,
+                    name = t.title,
+                    year = t.releaseDate?.take(4)?.toIntOrNull(),
+                    posterPath = t.posterPath,
+                    originalTitle = null,
+                    originalLanguage = t.originalLanguage,
+                    backdropPath = t.backdropPath,
+                    overview = t.overview,
+                    tmdbVoteAverage = t.voteAverage,
+                    tmdbVoteCount = t.voteCount
+                )
+            }
+            ?.takeIf { it.isNotEmpty() }
+    }
+
     private suspend fun enrichDatabaseWithTmdb() {
         println("--- TMDB ENRICH START ---")
         enrichedCount.value = 0
@@ -339,6 +385,10 @@ class DataSyncManager(
                         val tmdbIdStr = tmdbData.first
                         val details = tmdbData.second!!
 
+                        val similarMovies = mapSimilarMovies(details)
+
+                        database.movieEntityQueries.deletePersonsForMovie(entity.id)
+
                         database.movieEntityQueries.updateMovieWithTmdb(
                             posterPath = details.posterPath,
                             backdropPath = details.backdropPath,
@@ -350,7 +400,10 @@ class DataSyncManager(
                             originalLanguage = details.originalLanguage,
                             budget = details.budget,
                             revenue = details.revenue,
-                            genres = details.genres.joinToString(", ") { it.name }.ifEmpty { null },
+                            genres = details.genres
+                                .map { it.name }
+                                .takeIf { it.isNotEmpty() }
+                                ?.let(json::encodeToString),
                             hungarianTitle = details.hungarianTitle,
                             tmdbPopularity = details.popularity,
                             tmdbVoteAverage = details.voteAverage,
@@ -358,18 +411,28 @@ class DataSyncManager(
                             collectionName = details.collection?.name,
                             trailerKey = details.trailerKey,
                             mpaaRating = details.mpaaRating,
-                            studios = details.studios.joinToString(", ") { it.name }.ifEmpty { null },
-                            productionCountries = details.productionCountries.joinToString(", ") { it.name }
-                                .ifEmpty { null },
-                            spokenLanguages = details.spokenLanguages.joinToString(", ") { it.englishName }
-                                .ifEmpty { null },
-                            similarMovies = details.similar?.results
-                                ?.take(10)
-                                ?.let { Json.encodeToString(it) },
+                            studios = details.studios
+                                .map { it.name }
+                                .takeIf { it.isNotEmpty() }
+                                ?.let(json::encodeToString),
+                            productionCountries = details.productionCountries
+                                .map { it.name }
+                                .takeIf { it.isNotEmpty() }
+                                ?.let(json::encodeToString),
+                            spokenLanguages = details.spokenLanguages
+                                .map { it.englishName }
+                                .takeIf { it.isNotEmpty() }
+                                ?.let(json::encodeToString),
+                            similarMovies = similarMovies?.let(json::encodeToString),
                             tmdbReviews = details.reviews?.results
                                 ?.take(5)
-                                ?.map { "${it.author}: ${it.content}" }
-                                ?.let { Json.encodeToString(it) },
+                                ?.mapNotNull {
+                                    val author = it.author.trim()
+                                    val content = it.content.trim()
+                                    if (author.isBlank() || content.isBlank()) null else "$author: $content"
+                                }
+                                ?.takeIf { it.isNotEmpty() }
+                                ?.let(json::encodeToString),
                             id = entity.id
                         )
 

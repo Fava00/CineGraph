@@ -324,7 +324,7 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
             }
 
             if (!movie.similarMovies.isNullOrEmpty()) {
-                item { SimilarMoviesSection(movie.similarMovies!!, detailTokens) }
+                item { SimilarMoviesSection(movie.similarMovies!!, detailTokens, navigator) }
             }
 
             item { LogsSection(logs, detailTokens) }
@@ -405,7 +405,7 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                         }
 
                         if (!movie.similarMovies.isNullOrEmpty()) {
-                            SimilarMoviesSection(movie.similarMovies!!, detailTokens)
+                            SimilarMoviesSection(movie.similarMovies!!, detailTokens, navigator)
                         }
                     }
                 }
@@ -852,7 +852,8 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
     @Composable
     private fun SimilarMoviesSection(
         movies: List<SimilarMovie>,
-        detailTokens: MovieDetailTokens
+        detailTokens: MovieDetailTokens,
+        navigator: Navigator
     ) {
         val colors = MaterialTheme.colorScheme
 
@@ -867,7 +868,8 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         HorizontalRow(items = movies) { similar ->
             SimilarMovieCard(
                 similar = similar,
-                detailTokens = detailTokens
+                detailTokens = detailTokens,
+                navigator = navigator
             )
         }
 
@@ -1233,7 +1235,7 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                     )
                 },
                 confirmButton = {
-                    TextButton(onClick = { }) {
+                    TextButton(onClick = { showDialog = false }) {
                         Text("Close", color = colors.primary)
                     }
                 }
@@ -1250,7 +1252,7 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color(0xFF202020))
                 .border(1.dp, colors.onBackground.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
-                .clickable {}
+                .clickable { showDialog = true }
                 .padding(16.dp)
         ) {
             Column {
@@ -1313,7 +1315,8 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
     @Composable
     private fun SimilarMovieCard(
         similar: SimilarMovie,
-        detailTokens: MovieDetailTokens
+        detailTokens: MovieDetailTokens,
+        navigator: Navigator
     ) {
         val colors = MaterialTheme.colorScheme
         val cardWidth = if (detailTokens.useTwoPaneLayout) 120.dp else 100.dp
@@ -1322,7 +1325,42 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         Column(
             modifier = Modifier
                 .width(cardWidth)
-                .clickable { }
+                .clickable {
+                    navigator.push(
+                        MovieDetailScreen(
+                            Movie(
+                                id = 0,
+                                tmdbId = similar.tmdbId,
+                                name = similar.name.orEmpty(),
+                                year = similar.year ?: 0,
+                                posterPath = similar.posterPath,
+                                backdropPath = similar.backdropPath,
+                                overview = similar.overview,
+                                tagline = similar.tagline,
+                                runtimeMinutes = similar.runtimeMinutes,
+                                originalTitle = similar.originalTitle,
+                                originalLanguage = similar.originalLanguage,
+                                budget = similar.budget,
+                                revenue = similar.revenue,
+                                tmdbPopularity = similar.tmdbPopularity,
+                                tmdbVoteAverage = similar.tmdbVoteAverage,
+                                tmdbVoteCount = similar.tmdbVoteCount,
+                                trailerKey = similar.trailerKey,
+                                mpaaRating = similar.mpaaRating,
+                                imdbId = similar.imdbId,
+                                genres = similar.genres,
+                                studios = similar.studios,
+                                productionCountries = similar.productionCountries,
+                                spokenLanguages = similar.spokenLanguages,
+                                actors = similar.actors,
+                                crew = similar.crew,
+                                similarMovies = null,
+                                tmdbReviews = null,
+                                letterboxdUri = null
+                            )
+                        )
+                    )
+                }
         ) {
             Box(
                 modifier = Modifier

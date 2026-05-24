@@ -80,6 +80,17 @@ CREATE TABLE ListEntry (
     FOREIGN KEY (movieId) REFERENCES MovieEntity(id) ON DELETE CASCADE
 );
 
+CREATE TABLE DiscoveryIgnoredEntity (
+  tmdbId INTEGER NOT NULL PRIMARY KEY,
+  title TEXT NOT NULL,
+  year INTEGER,
+  posterPath TEXT,
+  overview TEXT,
+  runtimeMinutes INTEGER,
+  tmdbVoteAverage REAL,
+  createdAt TEXT NOT NULL
+);
+
 -- =============================================================================
 -- Indexes for performance-critical queries
 -- =============================================================================
@@ -112,6 +123,10 @@ ON MoviePersonEntity(job, name, movieId);
 insertMoviePerson:
 INSERT INTO MoviePersonEntity(movieId, name, job, character, profilePath)
 VALUES (?, ?, ?, ?, ?);
+
+deletePersonsForMovie:
+DELETE FROM MoviePersonEntity
+WHERE movieId = ?;
 
 getPersonsForMovie:
 SELECT *
@@ -182,8 +197,6 @@ UPDATE MovieEntity
 SET addedDate = :addedDate
 WHERE id = :id;
 
-
-
 -- =============================================================================
 -- Queries: Movie CRUD
 -- =============================================================================
@@ -222,6 +235,143 @@ DELETE FROM MovieEntity;
 getLastInsertId:
 SELECT last_insert_rowid();
 
+insertOrReplaceIgnoredMovie:
+INSERT OR REPLACE INTO DiscoveryIgnoredEntity(
+  tmdbId,
+  title,
+  year,
+  posterPath,
+  overview,
+  runtimeMinutes,
+  tmdbVoteAverage,
+  createdAt
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+deleteIgnoredMovie:
+DELETE FROM DiscoveryIgnoredEntity
+WHERE tmdbId = ?;
+
+isMovieIgnored:
+SELECT EXISTS(
+  SELECT 1
+  FROM DiscoveryIgnoredEntity
+  WHERE tmdbId = ?
+);
+
+getMovieById:
+SELECT
+    MovieEntity.id,
+    MovieEntity.name,
+    MovieEntity.year,
+    MovieEntity.letterboxdUri,
+    MovieEntity.imdbId,
+    MovieEntity.isWatched,
+    MovieEntity.inWatchlist,
+    MovieEntity.isCached,
+    MovieEntity.posterPath,
+    MovieEntity.backdropPath,
+    MovieEntity.overview,
+    MovieEntity.runtimeMinutes,
+    MovieEntity.tmdbId,
+    MovieEntity.tagline,
+    MovieEntity.originalTitle,
+    MovieEntity.originalLanguage,
+    MovieEntity.budget,
+    MovieEntity.revenue,
+    MovieEntity.genres,
+    MovieEntity.hungarianTitle,
+    MovieEntity.tmdbPopularity,
+    MovieEntity.tmdbVoteAverage,
+    MovieEntity.tmdbVoteCount,
+    MovieEntity.collectionName,
+    MovieEntity.trailerKey,
+    MovieEntity.mpaaRating,
+    MovieEntity.addedDate,
+    MovieEntity.studios,
+    MovieEntity.productionCountries,
+    MovieEntity.spokenLanguages,
+    MovieEntity.similarMovies,
+    MovieEntity.tmdbReviews,
+    COALESCE(
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.rating
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND log.rating IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS rating,
+    COALESCE(
+        (
+            SELECT log.watchedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.loggedDate
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        )
+    ) AS watchedDate,
+    COALESCE(
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.watchedDate IS NOT NULL
+            ORDER BY log.watchedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        (
+            SELECT log.isRewatch
+            FROM MovieLogEntity log
+            WHERE log.movieId = MovieEntity.id
+              AND log.loggedDate IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM MovieLogEntity w
+                  WHERE w.movieId = MovieEntity.id
+                    AND w.watchedDate IS NOT NULL
+              )
+            ORDER BY log.loggedDate DESC, log.id DESC
+            LIMIT 1
+        ),
+        0
+    ) AS isRewatch
+FROM MovieEntity
+WHERE MovieEntity.id = ?
+LIMIT 1;
+
 -- =============================================================================
 -- Queries: Movie Lookups
 -- =============================================================================
@@ -230,12 +380,28 @@ SELECT id
 FROM MovieEntity
 WHERE isWatched = 1;
 
+getIgnoredMovies:
+SELECT *
+FROM DiscoveryIgnoredEntity
+ORDER BY createdAt DESC;
+
 getMovieByUniqueData:
 SELECT * FROM MovieEntity
 WHERE (letterboxdUri IS NOT NULL AND letterboxdUri = :uri)
    OR (imdbId IS NOT NULL AND imdbId = :imdb)
    OR (name = :name AND year = :year)
 LIMIT 1;
+
+getMovieIdByTmdbId:
+SELECT id
+FROM MovieEntity
+WHERE tmdbId = ?
+LIMIT 1;
+
+markMovieCached:
+UPDATE MovieEntity
+SET isCached = 1
+WHERE id = ?;
 
 getAllMovieKeys:
 SELECT id, name, year, letterboxdUri, imdbId
@@ -506,7 +672,7 @@ WHERE
         )
     );
 
-ggetMoviesByFilterAndDate:
+getMoviesByFilterAndDate:
  SELECT
      m.id,
      m.name,
@@ -1638,3 +1804,26 @@ deleteAllData:
 DELETE FROM MovieEntity;
 DELETE FROM MovieLogEntity;
 DELETE FROM MoviePersonEntity;
+
+-- =============================================================================
+-- For Exports
+-- =============================================================================
+
+
+selectAllMovieEntities:
+SELECT * FROM MovieEntity ORDER BY id;
+
+selectAllMoviePersons:
+SELECT * FROM MoviePersonEntity ORDER BY movieId, id;
+
+selectAllMovieLogs:
+SELECT * FROM MovieLogEntity ORDER BY movieId, COALESCE(watchedDate, loggedDate), id;
+
+selectAllCustomLists:
+SELECT * FROM CustomList ORDER BY id;
+
+selectAllListEntries:
+SELECT * FROM ListEntry ORDER BY listId, movieId;
+
+selectAllIgnoredMovies:
+SELECT * FROM DiscoveryIgnoredEntity ORDER BY createdAt DESC;

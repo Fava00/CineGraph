@@ -14,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.martonegyed.core.ui.formatWatchedDate
 import com.martonegyed.core.util.MovieListDisplayModel
+import com.martonegyed.domain.model.Movie
 import com.martonegyed.presentation.components.common.cards.MovieCard
 import com.martonegyed.presentation.components.common.cards.SectionCard
 import com.martonegyed.presentation.screens.yearinreview.WatchedMovieRow
@@ -22,6 +23,7 @@ import com.martonegyed.presentation.screens.yearinreview.WatchedMovieRow
 fun FirstLastMovieSection(
     firstMovie: WatchedMovieRow?,
     lastMovie: WatchedMovieRow?,
+    onMovieClick: (Movie) -> Unit = {}
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -34,7 +36,8 @@ fun FirstLastMovieSection(
             ) {
                 FirstLastMovieContent(
                     label = "FIRST",
-                    row = firstMovie
+                    row = firstMovie,
+                    onMovieClick = onMovieClick
                 )
             }
         } else {
@@ -48,7 +51,8 @@ fun FirstLastMovieSection(
             ) {
                 FirstLastMovieContent(
                     label = "LAST",
-                    row = lastMovie
+                    row = lastMovie,
+                    onMovieClick = onMovieClick
                 )
             }
         } else {
@@ -61,7 +65,7 @@ fun FirstLastMovieSection(
 private fun FirstLastMovieContent(
     label: String,
     row: WatchedMovieRow,
-    onMovieClick: (Long) -> Unit = {}
+    onMovieClick: (Movie) -> Unit = {}
 ) {
     val colors = MaterialTheme.colorScheme
 
@@ -90,7 +94,7 @@ private fun FirstLastMovieContent(
             showRating = false,
             centerTitle = true,
             posterMaxWidth = 120.dp,
-            onTap = { onMovieClick(row.movie.id.toLong()) }
+            onTap = { onMovieClick(row.movie) }
         )
 
         Text(

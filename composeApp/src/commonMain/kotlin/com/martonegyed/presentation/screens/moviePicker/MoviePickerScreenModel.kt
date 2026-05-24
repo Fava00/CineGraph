@@ -53,7 +53,6 @@ data class MoviePickerRequest(
     val minimumRating: Float,
     val selectedDecades: Set<Int>,
     val languages: Set<String>,
-    val productionCountries: Set<String>
 )
 
 data class MoviePickerUiState(
@@ -68,25 +67,31 @@ data class MoviePickerUiState(
     val selectedDecades: Set<Int> = emptySet(),
     val availableLanguages: List<PickerOption> = emptyList(),
     val selectedLanguages: Set<String> = emptySet(),
-    val availableCountries: List<PickerOption> = emptyList(),
-    val selectedCountries: Set<String> = emptySet(),
     val isLoadingMeta: Boolean = false,
     val errorMessage: String? = null
 ) {
     val needsSearchDepth: Boolean
         get() = source == MoviePickerSearchSource.DISCOVER_NEW || source == MoviePickerSearchSource.BOTH
+
+    val searchDepthEtaText: String
+        get() = when {
+            !needsSearchDepth -> ""
+            searchDepth <= 60 -> "Usually about 1–3 seconds."
+            searchDepth <= 120 -> "Usually about 2–5 seconds."
+            searchDepth <= 200 -> "Usually about 4–8 seconds."
+            searchDepth <= 320 -> "Usually about 6–12 seconds."
+            else -> "Usually about 10–18 seconds."
+        }
 }
 
 class MoviePickerScreenModel(
     private val tmdbApiService: TmdbApiService,
-    @Suppress("unused") private val database: CineGraphDatabase
 ) : ScreenModel {
 
     private val _uiState = MutableStateFlow(
         MoviePickerUiState(
             decades = defaultDecades,
             availableLanguages = defaultLanguages,
-            availableCountries = defaultCountries
         )
     )
     val uiState = _uiState.asStateFlow()
@@ -143,13 +148,6 @@ class MoviePickerScreenModel(
         )
     }
 
-    fun toggleCountry(code: String) {
-        val selected = _uiState.value.selectedCountries
-        _uiState.value = _uiState.value.copy(
-            selectedCountries = if (code in selected) selected - code else selected + code
-        )
-    }
-
     fun buildRequest(): MoviePickerRequest {
         val state = _uiState.value
         return MoviePickerRequest(
@@ -162,7 +160,6 @@ class MoviePickerScreenModel(
             minimumRating = state.minimumRating,
             selectedDecades = state.selectedDecades,
             languages = state.selectedLanguages,
-            productionCountries = state.selectedCountries
         )
     }
 
@@ -210,33 +207,6 @@ class MoviePickerScreenModel(
             PickerOption("tr", "Turkish"),
             PickerOption("ru", "Russian"),
             PickerOption("ar", "Arabic")
-        ).sortedBy { it.label }
-
-        private val defaultCountries = listOf(
-            PickerOption("US", "United States"),
-            PickerOption("GB", "United Kingdom"),
-            PickerOption("FR", "France"),
-            PickerOption("DE", "Germany"),
-            PickerOption("IT", "Italy"),
-            PickerOption("ES", "Spain"),
-            PickerOption("HU", "Hungary"),
-            PickerOption("JP", "Japan"),
-            PickerOption("KR", "South Korea"),
-            PickerOption("CN", "China"),
-            PickerOption("HK", "Hong Kong"),
-            PickerOption("IN", "India"),
-            PickerOption("SE", "Sweden"),
-            PickerOption("DK", "Denmark"),
-            PickerOption("NO", "Norway"),
-            PickerOption("FI", "Finland"),
-            PickerOption("PL", "Poland"),
-            PickerOption("CZ", "Czech Republic"),
-            PickerOption("TR", "Turkey"),
-            PickerOption("BR", "Brazil"),
-            PickerOption("MX", "Mexico"),
-            PickerOption("CA", "Canada"),
-            PickerOption("AU", "Australia"),
-            PickerOption("NZ", "New Zealand")
         ).sortedBy { it.label }
     }
 }

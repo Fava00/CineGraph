@@ -40,8 +40,8 @@ import kotlin.math.abs
 
 @Immutable
 data class WorldMapCountryVisual(
+    val alpha2Code: String,
     val name: String,
-    val normalizedName: String,
     val count: Int,
     val fillColor: Color
 )
@@ -54,8 +54,9 @@ private data class WorldMapBounds(
 )
 
 private data class ProjectedCountryShape(
+    val selectionKey: String,
+    val alpha2Code: String?,
     val name: String,
-    val normalizedName: String,
     val count: Int,
     val fillColor: Color,
     val polygons: List<List<Offset>>
@@ -81,22 +82,22 @@ fun WorldCountriesMap(
         )
     }
 
-    val countriesByName = remember(countries) {
-        countries.associateBy { it.normalizedName }
+    val countriesByCode = remember(countries) {
+        countries.associateBy { it.alpha2Code.uppercase() }
     }
 
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
-    var selectedCountryName by remember { mutableStateOf<String?>(null) }
+    var selectedCountryKey by remember { mutableStateOf<String?>(null) }
 
-    val projectedShapes = remember(geoCountries, countriesByName, bounds, canvasSize, zoom, pan) {
+    val projectedShapes = remember(geoCountries, countriesByCode, bounds, canvasSize, zoom, pan) {
         if (canvasSize.width == 0 || canvasSize.height == 0) {
             emptyList()
         } else {
             buildProjectedShapes(
                 geoCountries = geoCountries,
-                countriesByName = countriesByName,
+                countriesByCode = countriesByCode,
                 bounds = bounds,
                 canvasSize = Size(canvasSize.width.toFloat(), canvasSize.height.toFloat()),
                 zoom = zoom,
@@ -106,12 +107,13 @@ fun WorldCountriesMap(
         }
     }
 
-    val selectedCountry = remember(projectedShapes, selectedCountryName) {
-        projectedShapes.firstOrNull { it.normalizedName == selectedCountryName }
+    val selectedCountry = remember(projectedShapes, selectedCountryKey) {
+        projectedShapes.firstOrNull { it.selectionKey == selectedCountryKey }
+            ?.takeIf { it.alpha2Code != null }
             ?.let {
                 WorldMapCountryVisual(
+                    alpha2Code = it.alpha2Code!!,
                     name = it.name,
-                    normalizedName = it.normalizedName,
                     count = it.count,
                     fillColor = it.fillColor
                 )
@@ -193,12 +195,12 @@ fun WorldCountriesMap(
                                     shape.polygons.any { polygon -> pointInPolygon(tapOffset, polygon) }
                                 }
 
-                            selectedCountryName = hit?.normalizedName
+                            selectedCountryKey = hit?.selectionKey
                             onCountrySelected(
-                                hit?.let {
+                                hit?.takeIf { it.alpha2Code != null }?.let {
                                     WorldMapCountryVisual(
+                                        alpha2Code = it.alpha2Code!!,
                                         name = it.name,
-                                        normalizedName = it.normalizedName,
                                         count = it.count,
                                         fillColor = it.fillColor
                                     )
@@ -223,13 +225,13 @@ fun WorldCountriesMap(
                     drawPath(path = path, color = country.fillColor)
                     drawPath(
                         path = path,
-                        color = if (country.normalizedName == selectedCountryName) {
+                        color = if (country.selectionKey == selectedCountryKey) {
                             colors.primary
                         } else {
                             colors.outlineVariant.copy(alpha = 0.5f)
                         },
                         style = Stroke(
-                            width = if (country.normalizedName == selectedCountryName) {
+                            width = if (country.selectionKey == selectedCountryKey) {
                                 1.6.dp.toPx()
                             } else {
                                 0.8.dp.toPx()
@@ -336,7 +338,7 @@ private fun MapZoomButton(
 
 private fun buildProjectedShapes(
     geoCountries: List<GeoCountryShape>,
-    countriesByName: Map<String, WorldMapCountryVisual>,
+    countriesByCode: Map<String, WorldMapCountryVisual>,
     bounds: WorldMapBounds,
     canvasSize: Size,
     zoom: Float,
@@ -372,12 +374,14 @@ private fun buildProjectedShapes(
     }
 
     return geoCountries.map { country ->
-        val normalizedName = normalizeCountryName(country.name)
-        val visual = countriesByName[normalizedName]
+        val alpha2Code = countryAlpha2Code(country.name)?.uppercase()
+        val visual = alpha2Code?.let { countriesByCode[it] }
+        val selectionKey = alpha2Code ?: normalizeCountryName(country.name)
 
         ProjectedCountryShape(
-            name = country.name,
-            normalizedName = normalizedName,
+            selectionKey = selectionKey,
+            alpha2Code = alpha2Code,
+            name = visual?.name ?: country.name,
             count = visual?.count ?: 0,
             fillColor = visual?.fillColor ?: defaultFill,
             polygons = country.polygons.map { polygon ->

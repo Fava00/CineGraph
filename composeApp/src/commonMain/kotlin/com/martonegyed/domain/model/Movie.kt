@@ -1,6 +1,10 @@
 package com.martonegyed.domain.model
 
+import com.martonegyed.presentation.screens.moviePicker.MoviePickerCandidateUi
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 
 @Serializable
 data class Movie(
@@ -51,6 +55,16 @@ data class Movie(
     val writers: List<Person>
         get() = crew?.filter { it.job == "Screenplay" || it.job == "Writer" } ?: emptyList()
 }
+
+fun MoviePickerCandidateUi.toMovie(): Movie = Movie(
+    name = title,
+    posterPath = posterPath,
+    year = year?.toInt() ?: 0,
+    runtimeMinutes = runtimeMinutes,
+    tmdbVoteAverage = tmdbVoteAverage,
+    overview = overview ?: "",
+    letterboxdUri = null,
+)
 
 @Serializable
 data class SimilarMovie(

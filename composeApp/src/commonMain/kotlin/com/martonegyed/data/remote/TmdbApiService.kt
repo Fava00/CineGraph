@@ -266,11 +266,16 @@ class TmdbApiService(private val client: HttpClient) {
     }
 
     suspend fun discoverMovies(
-        castIds: List<Int>,
-        crewIds: List<Int>,
-        genreIds: List<Int>,
-        fromYear: Int?,
-        toYear: Int?,
+        castIds: List<Int> = emptyList(),
+        crewIds: List<Int> = emptyList(),
+        includedGenreIds: List<Int> = emptyList(),
+        excludedGenreIds: List<Int> = emptyList(),
+        originalLanguages: List<String> = emptyList(),
+        fromYear: Int? = null,
+        toYear: Int? = null,
+        minRuntime: Int? = null,
+        maxRuntime: Int? = null,
+        minVoteAverage: Float? = null,
         page: Int = 1
     ): TmdbDiscoverMovieResponse? {
         return try {
@@ -289,12 +294,24 @@ class TmdbApiService(private val client: HttpClient) {
                     parameter("with_crew", crewIds.joinToString(","))
                 }
 
-                if (genreIds.isNotEmpty()) {
-                    parameter("with_genres", genreIds.joinToString("|"))
+                if (includedGenreIds.isNotEmpty()) {
+                    parameter("with_genres", includedGenreIds.joinToString("|"))
+                }
+
+                if (excludedGenreIds.isNotEmpty()) {
+                    parameter("without_genres", excludedGenreIds.joinToString(","))
+                }
+
+                if (originalLanguages.isNotEmpty()) {
+                    parameter("with_original_language", originalLanguages.joinToString("|"))
                 }
 
                 fromYear?.let { parameter("primary_release_date.gte", "$it-01-01") }
                 toYear?.let { parameter("primary_release_date.lte", "$it-12-31") }
+
+                minRuntime?.let { parameter("with_runtime.gte", it) }
+                maxRuntime?.let { parameter("with_runtime.lte", it) }
+                minVoteAverage?.let { parameter("vote_average.gte", it) }
             }.body()
         } catch (e: Exception) {
             println("TMDB Discover Error: ${e.message}")

@@ -155,13 +155,12 @@ fun AppDrawer(
                 isSelected = currentScreen is MoviePickerScreen,
             ) {
                 navigateTo(navigator, closeDrawer, currentScreen, MoviePickerScreen())
-
                 closeDrawer()
             }
 
             DrawerItem(
                 Icons.Default.Event, "Cinema Calendar",
-                isSelected = false
+                isSelected = currentScreen is CalendarScreen,
             ) {
                 navigateTo(navigator, closeDrawer, currentScreen, CalendarScreen())
                 closeDrawer()
@@ -169,14 +168,12 @@ fun AppDrawer(
 
             DrawerItem(
                 Icons.Default.Event, "Collab Search",
-                isSelected = false
+                isSelected = currentScreen is CollabSearchScreen,
             ) {
                 navigateTo(navigator, closeDrawer, currentScreen, CollabSearchScreen())
                 closeDrawer()
             }
         }
-
-
     }
 }
 
