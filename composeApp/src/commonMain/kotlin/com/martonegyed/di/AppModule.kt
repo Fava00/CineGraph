@@ -4,6 +4,8 @@ import com.martonegyed.data.local.DataSyncManager
 import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.data.local.CsvImportService
 import com.martonegyed.data.local.SqlDelightDiscoveryManagerRepository
+import com.martonegyed.data.local.export.BackupExportService
+import com.martonegyed.data.local.export.LetterboxdExportService
 import com.martonegyed.data.remote.TmdbApiService
 import com.martonegyed.presentation.analytics.AnalyticsRepository
 import com.martonegyed.presentation.screens.collabSearch.CollabSearchScreenModel
@@ -48,9 +50,11 @@ val appModule = module {
     single<DiscoveryManagerRepository> {
         SqlDelightDiscoveryManagerRepository(get())
     }
+    single { BackupExportService(get()) }
+    single { LetterboxdExportService(get()) }
 
 
-    factory { ImportScreenModel(get(), get(), get(), get()) }
+    factory { ImportScreenModel(get(), get(), get(), get(), get(), get()) }
     factory { MovieCollectionScreenModel(get()) }
     factory { MovieDetailScreenModel(get(), get()) }
     factory { StatisticsScreenModel(get()) }

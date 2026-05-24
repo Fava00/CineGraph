@@ -59,21 +59,17 @@ class LetterboxdExportService(
         val moviesById = movies.associateBy { it.id }
         val logsByMovie = logs.groupBy { it.movieId }
 
-        val diaryHeader =
-            "date,name,year,letterboxd uri,rating,rewatch,tags,watched date"
-        val reviewsHeader =
-            "date,name,year,letterboxd uri,rating,rewatch,review,tags,watched date"
-        val watchedHeader =
-            "date,name,year,letterboxd uri"
-        val watchlistHeader =
-            "date,name,year,letterboxd uri"
-        val ratingsHeader =
-            "date,name,year,letterboxd uri,rating"
+        val diaryHeader = "date,name,year,letterboxd uri,rating,rewatch,tags,watched date"
+        val reviewsHeader = "date,name,year,letterboxd uri,rating,rewatch,review,tags,watched date"
+        val watchedHeader = "date,name,year,letterboxd uri"
+        val watchlistHeader = "date,name,year,letterboxd uri"
+        val ratingsHeader = "date,name,year,letterboxd uri,rating"
 
         val diaryRows = buildList {
             logs.forEach { log ->
                 val movie = moviesById[log.movieId] ?: return@forEach
                 val watchedDate = log.watchedDate ?: return@forEach
+
                 add(
                     csvRow(
                         log.loggedDate ?: watchedDate,
@@ -155,9 +151,7 @@ class LetterboxdExportService(
 
                 add(
                     csvRow(
-                        latestRatedLog.loggedDate
-                            ?: latestRatedLog.watchedDate
-                            ?: "",
+                        latestRatedLog.loggedDate ?: latestRatedLog.watchedDate ?: "",
                         movie.name,
                         movie.year.toString(),
                         movie.letterboxdUri.orEmpty(),

@@ -27,14 +27,19 @@ import com.martonegyed.data.local.DataSyncManager
 import com.martonegyed.core.ui.adaptive.AdaptiveLayout
 import com.martonegyed.core.ui.adaptive.AdaptiveScaffoldTokens
 import com.martonegyed.core.ui.adaptive.ImportScreenTokens
+import com.martonegyed.core.util.writePickedFile
 import com.martonegyed.presentation.components.common.AppDrawer
 import com.martonegyed.presentation.components.common.ErrorView
 import com.martonegyed.presentation.components.common.LoadingView
 import com.martonegyed.presentation.components.common.SuccessView
 import com.martonegyed.presentation.components.importing.PlatformCard
+import io.github.vinceglb.filekit.compose.rememberDirectoryPickerLauncher
 import io.github.vinceglb.filekit.compose.rememberFilePickerLauncher
+import io.github.vinceglb.filekit.compose.rememberFileSaverLauncher
 import io.github.vinceglb.filekit.core.PickerMode
 import io.github.vinceglb.filekit.core.PickerType
+import io.github.vinceglb.filekit.core.PlatformDirectory
+import io.github.vinceglb.filekit.core.PlatformFile
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import kotlin.collections.emptyList
@@ -44,6 +49,7 @@ private val DesktopRightPaneMaxWidth = 400.dp
 private val DesktopActionButtonMaxWidth = 320.dp
 private val DesktopActionButtonMinWidth = 220.dp
 private val DesktopCardSpacing = 18.dp
+
 
 class ImportScreen : Screen {
 
@@ -63,10 +69,76 @@ class ImportScreen : Screen {
 
         var selectedTabIndex by remember { mutableStateOf(0) }
 
+        var pendingSingleFile by remember { mutableStateOf<ExportPayload.SingleFile?>(null) }
+        var pendingMultiFiles by remember { mutableStateOf<List<ExportFile>>(emptyList()) }
+        var currentQueuedFile by remember { mutableStateOf<ExportFile?>(null) }
+
+        val fileSaver = rememberFileSaverLauncher { file: PlatformFile? ->
+            val singlePayload = pendingSingleFile
+            val queuedFile = currentQueuedFile
+
+            if (file == null) {
+                pendingSingleFile = null
+                pendingMultiFiles = emptyList()
+                currentQueuedFile = null
+                screenModel.onExportCancelled()
+            } else {
+                scope.launch {
+                    when {
+                        singlePayload != null -> {
+                            writePickedFile(file, singlePayload.bytes)
+                            screenModel.onExportSaved("${singlePayload.fileName} exported")
+                            pendingSingleFile = null
+                        }
+
+                        queuedFile != null -> {
+                            writePickedFile(file, queuedFile.bytes)
+
+                            val remaining = pendingMultiFiles.drop(1)
+                            pendingMultiFiles = remaining
+
+                            if (remaining.isEmpty()) {
+                                currentQueuedFile = null
+                                screenModel.onExportSaved("5 CSV files exported")
+                            } else {
+                                currentQueuedFile = remaining.first()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        LaunchedEffect(pendingSingleFile) {
+            val payload = pendingSingleFile ?: return@LaunchedEffect
+            fileSaver.launch(
+                baseName = payload.fileName.substringBeforeLast("."),
+                extension = payload.fileName.substringAfterLast(".")
+            )
+        }
+
+        LaunchedEffect(currentQueuedFile) {
+            val file = currentQueuedFile ?: return@LaunchedEffect
+            fileSaver.launch(
+                baseName = file.fileName.substringBeforeLast("."),
+                extension = file.fileName.substringAfterLast(".")
+            )
+        }
 
 
         LaunchedEffect(Unit) {
-            dataSyncManager.refreshPendingEnrichment()
+            screenModel.exportPayload.collect { payload ->
+                when (payload) {
+                    is ExportPayload.SingleFile -> {
+                        pendingSingleFile = payload
+                    }
+
+                    is ExportPayload.MultiFile -> {
+                        pendingMultiFiles = payload.files
+                        currentQueuedFile = payload.files.firstOrNull()
+                    }
+                }
+            }
         }
 
         if (hasPending && phase == DataSyncManager.Phase.IDLE && !promptShown) {
@@ -269,7 +341,6 @@ class ImportScreen : Screen {
             }
         }
     }
-
 
     @OptIn(ExperimentalLayoutApi::class)
     @Composable
@@ -680,7 +751,7 @@ class ImportScreen : Screen {
         modifier: Modifier = Modifier
     ) {
         val dataSyncManager: DataSyncManager = koinInject()
-
+        val colors = MaterialTheme.colorScheme
         val phase by dataSyncManager.phase.collectAsState()
         val hasPending by dataSyncManager.hasPendingEnrichment.collectAsState()
         val importedCount by dataSyncManager.importedCount.collectAsState()
@@ -722,7 +793,7 @@ class ImportScreen : Screen {
                     onCancel = { dataSyncManager.cancelAll() }
                 )
             }
-            /*
+
             if (phase != DataSyncManager.Phase.IDLE) {
                 Surface(
                     color = colors.surfaceVariant,
@@ -747,7 +818,7 @@ class ImportScreen : Screen {
                         )
                     }
                 }
-            }*/
+            }
 
             if (hasPending && phase == DataSyncManager.Phase.IDLE) {
                 PendingEnrichmentCard(
@@ -937,11 +1008,11 @@ class ImportScreen : Screen {
                         style = MaterialTheme.typography.bodySmall
                     )
                     LinearProgressIndicator(
-                    progress = { importedProgress },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = colors.primary,
-                    trackColor = colors.surface,
-                    strokeCap = ProgressIndicatorDefaults.LinearStrokeCap,
+                        progress = { importedProgress },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = colors.primary,
+                        trackColor = colors.surface,
+                        strokeCap = ProgressIndicatorDefaults.LinearStrokeCap,
                     )
                 }
 

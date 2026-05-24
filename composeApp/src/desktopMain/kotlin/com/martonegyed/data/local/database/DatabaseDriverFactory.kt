@@ -16,12 +16,7 @@ actual class DatabaseDriverFactory {
 
         if (isNewDatabase) {
             CineGraphDatabase.Schema.create(driver)
-        } /*TODO:migrate
-         else {
-            JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}").also {
-                CineGraphDatabase.Schema.migrate(it, oldVersion, CineGraphDatabase.Schema.version)
-            }
-        }*/
+        }
         return driver
     }
 }

@@ -197,4 +197,71 @@ class BackupExportService(
 
         return json.encodeToString(CineGraphBackup.serializer(), backup)
     }
+
+    fun restoreJsonBackup(jsonString: String) {
+        val backup = json.decodeFromString(CineGraphBackup.serializer(), jsonString)
+
+        database.transaction {
+            database.movieEntityQueries.deleteAllData()
+
+            backup.movies.forEach { movie ->
+                database.movieEntityQueries.insertMovie(
+                    name = movie.name,
+                    year = movie.year,
+                    letterboxdUri = movie.letterboxdUri,
+                    imdbId = movie.imdbId,
+                    isWatched = movie.isWatched,
+                    inWatchlist = movie.inWatchlist,
+                    isCached = movie.isCached,
+                    posterPath = movie.posterPath,
+                    backdropPath = movie.backdropPath,
+                    overview = movie.overview,
+                    runtimeMinutes = movie.runtimeMinutes,
+                    tmdbId = movie.tmdbId,
+                    tagline = movie.tagline,
+                    originalTitle = movie.originalTitle,
+                    originalLanguage = movie.originalLanguage,
+                    budget = movie.budget,
+                    revenue = movie.revenue,
+                    genres = movie.genres,
+                    hungarianTitle = movie.hungarianTitle,
+                    tmdbPopularity = movie.tmdbPopularity,
+                    tmdbVoteAverage = movie.tmdbVoteAverage,
+                    tmdbVoteCount = movie.tmdbVoteCount,
+                    collectionName = movie.collectionName,
+                    trailerKey = movie.trailerKey,
+                    mpaaRating = movie.mpaaRating,
+                    addedDate = movie.addedDate,
+                    studios = movie.studios,
+                    productionCountries = movie.productionCountries,
+                    spokenLanguages = movie.spokenLanguages,
+                    similarMovies = movie.similarMovies,
+                    tmdbReviews = movie.tmdbReviews
+                )
+            }
+
+            backup.people.forEach { person ->
+                database.movieEntityQueries.insertMoviePerson(
+                    movieId = person.movieId,
+                    name = person.name,
+                    job = person.job,
+                    character = person.character,
+                    profilePath = person.profilePath
+                )
+            }
+
+            backup.logs.forEach { log ->
+                database.movieEntityQueries.insertMovieLog(
+                    movieId = log.movieId,
+                    watchedDate = log.watchedDate,
+                    loggedDate = log.loggedDate,
+                    rating = log.rating,
+                    review = log.review,
+                    isRewatch = log.isRewatch,
+                    sourceType = log.sourceType
+                )
+            }
+        }
+    }
 }
+

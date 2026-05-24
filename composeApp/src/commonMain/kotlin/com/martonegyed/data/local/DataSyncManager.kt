@@ -45,27 +45,6 @@ class DataSyncManager(
         encodeDefaults = true
     }
 
-    /*private fun mapSimilarMovies(details: MovieDetailsDto): List<SimilarMovie>? {
-        return details.similar?.results
-            ?.take(10)
-            ?.map { t ->
-                SimilarMovie(
-                    tmdbId = t.id,
-                    name = t.title,
-                    year = t.releaseDate?.take(4)?.toIntOrNull(),
-                    posterPath = t.posterPath,
-                    originalTitle = t.originalTitle,
-                    originalLanguage = t.originalLanguage,
-                    backdropPath = t.backdropPath,
-                    overview = t.overview,
-                    tmdbVoteAverage = t.voteAverage,
-                    tmdbVoteCount = t.voteCount
-                )
-            }
-            ?.takeIf { it.isNotEmpty() }
-    }*/
-
-
     fun startImportAndEnrich(stagedMovies: List<Map<String, Any?>>) {
 
         if (phase.value != Phase.IDLE) {
@@ -244,52 +223,7 @@ class DataSyncManager(
             }
         }
         recomputeRewatchFlags(movieId)
-        /*
-        val mergedLogsByDate = mutableMapOf<String, MutableMap<String, Any?>>()
-        for (log in logs) {
-            val date = log["watchedDate"]?.toString() ?: "unknown_date"
-            if (mergedLogsByDate.containsKey(date)) {
-                val existingLog = mergedLogsByDate[date]!!
-                if (existingLog["rating"] == null && log["rating"] != null) existingLog["rating"] = log["rating"]!!
-                if (existingLog["userReview"] == null && log["userReview"] != null) existingLog["userReview"] =
-                    log["userReview"]!!
-                if (log["isRewatch"] == true) existingLog["isRewatch"] = true
-            } else {
-                mergedLogsByDate[date] = log.toMutableMap()
-            }
-        }
 
-        for (log in mergedLogsByDate.values) {
-            val rating = log["rating"] as? Double
-            val watchedDate = log["watchedDate"]?.toString()
-            val review = log["userReview"]?.toString()
-            val isRewatch = if (log["isRewatch"] == true) 1L else 0L
-
-            if (!watchedDate.isNullOrEmpty() || rating != null || !review.isNullOrEmpty()) {
-                val safeDate = if (watchedDate == "unknown_date") null else watchedDate
-
-                val existingLog = database.movieEntityQueries.getLogByMovieAndDate(
-                    movieId = movieId, date = safeDate
-                ).executeAsOneOrNull()
-
-                if (existingLog != null) {
-                    database.movieEntityQueries.updateMovieLog(
-                        rating = rating ?: existingLog.rating,
-                        review = review ?: existingLog.review,
-                        isRewatch = if (isRewatch == 1L || existingLog.isRewatch == 1L) 1L else 0L,
-                        id = existingLog.id
-                    )
-                } else {
-                    database.movieEntityQueries.insertMovieLog(
-                        movieId = movieId,
-                        watchedDate = safeDate,
-                        rating = rating,
-                        review = review,
-                        isRewatch = isRewatch
-                    )
-                }
-            }
-        }*/
     }
 
     private fun recomputeRewatchFlags(movieId: Long) {

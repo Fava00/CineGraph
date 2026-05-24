@@ -65,13 +65,7 @@ fun CrewGroupCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            /*TODO:
-                               onDismiss()
-                            openPersonCollection(
-                                navigator = navigator,
-                                personName = person.name,
-                                entityType = StatEntityType.CREW
-                            )*/
+
                         }
                         .padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically

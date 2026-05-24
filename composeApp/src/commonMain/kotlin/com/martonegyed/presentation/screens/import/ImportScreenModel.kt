@@ -6,10 +6,13 @@ import com.martonegyed.data.local.DataSyncManager
 import com.martonegyed.data.local.CsvImportService
 import com.martonegyed.data.remote.TmdbApiService
 import com.martonegyed.data.database.CineGraphDatabase
+import com.martonegyed.data.local.export.BackupExportService
+import com.martonegyed.data.local.export.LetterboxdExportService
 import io.github.vinceglb.filekit.core.PlatformFile
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -20,11 +23,30 @@ sealed class SyncState {
     data class Error(val error: String) : SyncState()
 }
 
+sealed interface ExportPayload {
+    data class SingleFile(
+        val fileName: String,
+        val mimeType: String,
+        val bytes: ByteArray
+    ) : ExportPayload
+
+    data class MultiFile(
+        val files: List<ExportFile>
+    ) : ExportPayload
+}
+
+data class ExportFile(
+    val fileName: String,
+    val mimeType: String,
+    val bytes: ByteArray
+)
+
 class ImportScreenModel(
     private val csvService: CsvImportService,
     private val tmdbService: TmdbApiService,
     private val database: CineGraphDatabase,
-    private val dataSyncManager: DataSyncManager
+    private val dataSyncManager: DataSyncManager, private val backupExportService: BackupExportService,
+    private val letterboxdExportService: LetterboxdExportService,
 ) : ScreenModel {
 
     private data class SourcePayload(
@@ -32,6 +54,9 @@ class ImportScreenModel(
         val type: String,
         val items: List<Map<String, Any>>
     )
+
+    private val _exportPayload = MutableSharedFlow<ExportPayload>(extraBufferCapacity = 1)
+    val exportPayload = _exportPayload.asSharedFlow()
 
     private val _state = MutableStateFlow<SyncState>(SyncState.Idle)
     val state: StateFlow<SyncState> = _state.asStateFlow()
@@ -271,18 +296,67 @@ class ImportScreenModel(
 
     fun restoreBackup(file: PlatformFile) {
         screenModelScope.launch {
-            _state.value = SyncState.Loading("Restoring CineGraph backup...")
-            delay(1500)
-            _state.value = SyncState.Success("Backup restored successfully!")
+            try {
+                _state.value = SyncState.Loading("Restoring CineGraph backup...")
+                val json = file.readBytes().decodeToString()
+                backupExportService.restoreJsonBackup(json)
+                _state.value = SyncState.Success("Backup restored successfully!")
+            } catch (t: Throwable) {
+                _state.value = SyncState.Error("Restore failed: ${t.message}")
+            }
         }
     }
 
     fun exportData(platform: String) {
         screenModelScope.launch {
-            _state.value = SyncState.Loading("Generating $platform export...")
-            delay(2000)
-            _state.value = SyncState.Success("Successfully exported to $platform format!")
+            try {
+                when (platform) {
+                    "CineGraph" -> {
+                        _state.value = SyncState.Loading("Creating JSON backup...")
+                        val json = backupExportService.exportJsonBackup()
+
+                        _exportPayload.emit(
+                            ExportPayload.SingleFile(
+                                fileName = "cinegraph-backup.json",
+                                mimeType = "application/json",
+                                bytes = json.encodeToByteArray()
+                            )
+                        )
+                    }
+
+                    "Letterboxd" -> {
+                        _state.value = SyncState.Loading("Creating Letterboxd CSV files...")
+                        val bundle = letterboxdExportService.export()
+
+                        _exportPayload.emit(
+                            ExportPayload.MultiFile(
+                                files = listOf(
+                                    ExportFile("diary.csv", "text/csv", bundle.diaryCsv.encodeToByteArray()),
+                                    ExportFile("watched.csv", "text/csv", bundle.watchedCsv.encodeToByteArray()),
+                                    ExportFile("watchlist.csv", "text/csv", bundle.watchlistCsv.encodeToByteArray()),
+                                    ExportFile("ratings.csv", "text/csv", bundle.ratingsCsv.encodeToByteArray()),
+                                    ExportFile("reviews.csv", "text/csv", bundle.reviewsCsv.encodeToByteArray())
+                                )
+                            )
+                        )
+                    }
+
+                    else -> {
+                        _state.value = SyncState.Error("Unsupported export type: $platform")
+                    }
+                }
+            } catch (t: Throwable) {
+                _state.value = SyncState.Error("Export failed: ${t.message}")
+            }
         }
+    }
+
+    fun onExportSaved(message: String) {
+        _state.value = SyncState.Success(message)
+    }
+
+    fun onExportCancelled() {
+        _state.value = SyncState.Idle
     }
 
     fun reset() {
@@ -309,4 +383,5 @@ class ImportScreenModel(
     private fun importLog(message: String) {
         println("IMPORT_DEBUG | $message")
     }
+
 }
