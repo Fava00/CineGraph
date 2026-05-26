@@ -174,10 +174,10 @@ fun adaptiveTokensFor(windowInfo: AdaptiveWindowInfo): AdaptiveTokens {
             ),
             movieDetail = MovieDetailTokens(
                 useTwoPaneLayout = true,
-                heroHeight = 340.dp,
-                posterWidth = 220.dp,
-                paneSpacing = 24.dp,
-                titleFontSize = 34.sp,
+                heroHeight = 380.dp,
+                posterWidth = 190.dp,
+                paneSpacing = 32.dp,
+                titleFontSize = 32.sp,
                 bodyFontSize = 16.sp,
                 metaFontSize = 14.sp
             ),

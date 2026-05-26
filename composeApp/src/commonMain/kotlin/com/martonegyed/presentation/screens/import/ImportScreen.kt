@@ -436,28 +436,13 @@ class ImportScreen : Screen {
             PlatformCard(title = "Letterboxd", icon = Icons.Default.Movie) {
                 if (isDesktop) {
                     Text(
-                        "Import your full export folder, or bring in single CSV files if you only want part of your data.",
+                        "Import the letterboxd CSVs files",
                         color = colors.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(modifier = Modifier.height(14.dp))
                 }
-
-                Button(
-                    onClick = { multiFilePicker.launch() },
-                    modifier = desktopAwarePrimaryActionModifier(isDesktop),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.primary,
-                        contentColor = colors.onPrimary
-                    ),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Icon(Icons.Default.FolderZip, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Import Full Folder", fontWeight = FontWeight.Bold)
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
+                
                 Text(
                     "Import individual files:",
                     color = colors.onSurfaceVariant,

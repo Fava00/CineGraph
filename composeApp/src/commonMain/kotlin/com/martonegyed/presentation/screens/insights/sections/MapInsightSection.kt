@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.navigator.Navigator
 import com.martonegyed.presentation.analytics.AnalyticsSharedModels
 import com.martonegyed.presentation.analytics.StatRange
+import com.martonegyed.presentation.components.common.CollectionEntityType
 import com.martonegyed.presentation.components.common.SkeletonCard
 import com.martonegyed.presentation.components.common.cards.SectionCard
 import com.martonegyed.presentation.components.insights.WorldCountriesMap
@@ -37,7 +38,6 @@ import com.martonegyed.presentation.components.insights.countryAlpha2Code
 import com.martonegyed.presentation.components.insights.countryFlagEmoji
 import com.martonegyed.presentation.screens.movies.CollectionType
 import com.martonegyed.presentation.screens.movies.MovieCollectionScreen
-import com.martonegyed.presentation.screens.statistics.StatEntityType
 
 @Composable
 fun MapInsightSection(
@@ -104,7 +104,7 @@ fun MapInsightSection(
                         navigator.push(
                             MovieCollectionScreen(
                                 type = CollectionType.BY_ENTITY,
-                                entityType = StatEntityType.COUNTRIES,
+                                entityType = CollectionEntityType.COUNTRIES,
                                 entityName = country.name,
                                 range = range,
                                 year = year,
@@ -166,7 +166,7 @@ fun MapInsightSection(
                             navigator.push(
                                 MovieCollectionScreen(
                                     type = CollectionType.BY_ENTITY,
-                                    entityType = StatEntityType.COUNTRIES,
+                                    entityType = CollectionEntityType.COUNTRIES,
                                     entityName = row.name,
                                     range = range,
                                     year = year,

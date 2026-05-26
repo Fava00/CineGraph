@@ -178,6 +178,7 @@ class CsvImportService {
         val originalTitleIdx = headers.indexOf("original title")
         val yearIdx = headers.indexOf("year")
         val constIdx = headers.indexOf("const")
+        val urlIdx = headers.indexOf("url")
         val userRatingIdx = headers.indexOf("your rating")
         val dateRatedIdx = headers.indexOf("date rated")
         val createdIdx = headers.indexOf("created")
@@ -186,41 +187,69 @@ class CsvImportService {
             if (titleIdx == -1 || row.size <= titleIdx) continue
 
             val map = mutableMapOf<String, Any>()
-            map["name"] = row[titleIdx]
-            map["year"] = if (yearIdx != -1 && row.size > yearIdx) row[yearIdx].toIntOrNull() ?: 0 else 0
+            map["name"] = row[titleIdx].trim()
+            map["year"] = if (yearIdx != -1 && row.size > yearIdx) {
+                row[yearIdx].trim().toIntOrNull() ?: 0
+            } else 0
 
             if (originalTitleIdx != -1 && row.size > originalTitleIdx && row[originalTitleIdx].isNotBlank()) {
-                map["originalTitle"] = row[originalTitleIdx]
+                map["originalTitle"] = row[originalTitleIdx].trim()
             }
 
             if (constIdx != -1 && row.size > constIdx && row[constIdx].isNotBlank()) {
-                map["imdbId"] = row[constIdx]
+                map["imdbId"] = row[constIdx].trim()
+            }
+
+            if (urlIdx != -1 && row.size > urlIdx && row[urlIdx].isNotBlank()) {
+                map["imdbUrl"] = row[urlIdx].trim()
             }
 
             if (userRatingIdx != -1 && row.size > userRatingIdx && row[userRatingIdx].isNotBlank()) {
-                map["rating"] = row[userRatingIdx].toDoubleOrNull() ?: 0.0
+                map["rating"] = row[userRatingIdx].trim().toDoubleOrNull() ?: 0.0
             }
 
             val dateRated = if (dateRatedIdx != -1 && row.size > dateRatedIdx) {
-                row[dateRatedIdx].takeIf { it.isNotBlank() }
+                row[dateRatedIdx].trim().takeIf { it.isNotBlank() }
             } else null
 
             val created = if (createdIdx != -1 && row.size > createdIdx) {
-                row[createdIdx].takeIf { it.isNotBlank() }
+                row[createdIdx].trim().takeIf { it.isNotBlank() }
             } else null
 
-            if (type == "watchlist" || type == "lists") {
-                if (!created.isNullOrBlank()) {
-                    map["addedDate"] = created
+            when (type) {
+                "watchlist" -> {
+                    if (!created.isNullOrBlank()) {
+                        map["addedDate"] = created
+                    }
+                    map["inWatchlist"] = true
+                    map["sourceType"] = "WATCHLIST"
                 }
-                map["inWatchlist"] = true
-            } else {
-                if (!dateRated.isNullOrBlank()) {
-                    map["loggedDate"] = dateRated
-                } else if (!created.isNullOrBlank()) {
-                    map["loggedDate"] = created
+
+                "ratings" -> {
+                    if (!dateRated.isNullOrBlank()) {
+                        map["loggedDate"] = dateRated
+                        map["watchedDate"] = dateRated
+                    } else if (!created.isNullOrBlank()) {
+                        map["loggedDate"] = created
+                    }
+                    map["sourceType"] = "RATINGS"
                 }
-                map["sourceType"] = type.uppercase()
+
+                "lists" -> {
+                    if (!created.isNullOrBlank()) {
+                        map["addedDate"] = created
+                    }
+                    map["sourceType"] = "LISTS"
+                }
+
+                else -> {
+                    if (!dateRated.isNullOrBlank()) {
+                        map["loggedDate"] = dateRated
+                    } else if (!created.isNullOrBlank()) {
+                        map["loggedDate"] = created
+                    }
+                    map["sourceType"] = type.uppercase()
+                }
             }
 
             parsedMovies.add(map)

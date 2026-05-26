@@ -4,13 +4,21 @@ import cafe.adriel.voyager.navigator.Navigator
 import com.martonegyed.presentation.analytics.StatRange
 import com.martonegyed.presentation.screens.movies.CollectionType
 import com.martonegyed.presentation.screens.movies.MovieCollectionScreen
-import com.martonegyed.presentation.screens.statistics.StatEntityType
 
+enum class CollectionEntityType {
+    DIRECTORS,
+    ACTORS,
+    SCREENWRITERS,
+    CINEMATOGRAPHERS,
+    GENRES,
+    STUDIOS,
+    COUNTRIES
+}
 
-public fun openPersonCollection(
+fun openPersonCollection(
     navigator: Navigator,
     personName: String?,
-    entityType: StatEntityType,
+    entityType: CollectionEntityType,
     range: StatRange = StatRange.ALL_TIME,
     selectedYear: Int? = null,
     selectedMonth: Int? = null

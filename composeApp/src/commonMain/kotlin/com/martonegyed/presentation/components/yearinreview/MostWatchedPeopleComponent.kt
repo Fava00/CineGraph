@@ -24,8 +24,8 @@ import cafe.adriel.voyager.navigator.Navigator
 import coil3.compose.AsyncImage
 import com.martonegyed.presentation.analytics.AnalyticsSharedModels
 import com.martonegyed.presentation.analytics.StatRange
+import com.martonegyed.presentation.components.common.CollectionEntityType
 import com.martonegyed.presentation.components.common.openPersonCollection
-import com.martonegyed.presentation.screens.statistics.StatEntityType
 
 
 @Composable
@@ -44,7 +44,7 @@ fun MostWatchedPeopleRow(
             navigator = navigator,
             title = "Most watched actor",
             row = actor,
-            entityType = StatEntityType.ACTORS,
+            entityType = CollectionEntityType.ACTORS,
             selectedYear = selectedYear,
         )
 
@@ -53,7 +53,7 @@ fun MostWatchedPeopleRow(
             navigator = navigator,
             title = "Most watched director",
             row = director,
-            entityType = StatEntityType.DIRECTORS,
+            entityType = CollectionEntityType.DIRECTORS,
             selectedYear = selectedYear,
         )
     }
@@ -65,7 +65,7 @@ private fun MostWatchedPersonCard(
     navigator: Navigator,
     title: String,
     row: AnalyticsSharedModels.AnalyticsEntityRow?,
-    entityType: StatEntityType,
+    entityType: CollectionEntityType,
     selectedYear: Int?,
 ) {
     val colors = MaterialTheme.colorScheme

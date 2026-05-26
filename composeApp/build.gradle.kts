@@ -84,6 +84,7 @@ kotlin {
         iosMain.dependencies {
             implementation(libs.sqldelight.native)
             implementation(libs.ktor.client.darwin)
+            implementation(libs.kermit)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

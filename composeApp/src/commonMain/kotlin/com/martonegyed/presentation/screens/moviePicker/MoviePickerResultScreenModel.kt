@@ -2,6 +2,7 @@ package com.martonegyed.presentation.screens.moviePicker
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.martonegyed.core.AppLogger
 import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.data.remote.TmdbApiService
 import kotlinx.coroutines.Job
@@ -92,6 +93,11 @@ class MoviePickerResultsScreenModel(
                     queue = originalQueue
                 )
             } catch (t: Throwable) {
+                AppLogger.exception(
+                    tag = "DataSyncManager",
+                    throwable = t,
+                    message = "Failed to loa movie picker results: ${t.message}"
+                )
                 _uiState.value = MoviePickerDeckUiState(
                     isLoading = false,
                     errorMessage = t.message ?: "Failed to load movie picker results."

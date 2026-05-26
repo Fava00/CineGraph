@@ -2,6 +2,7 @@ package com.martonegyed.presentation.screens.details
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.martonegyed.core.AppLogger
 import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.data.remote.TmdbApiService
 import com.martonegyed.domain.model.Movie
@@ -69,7 +70,6 @@ class MovieDetailScreenModel(
     }
 
     private fun enrichIfNeeded(movie: Movie) {
-        print("needs enrichment: ${needsTmdbEnrichment(movie)}")
         if (!needsTmdbEnrichment(movie)) return
         enrichMovie(movie)
     }
@@ -92,27 +92,6 @@ class MovieDetailScreenModel(
 
         val missingIdentity = movie.originalTitle.isNullOrBlank() ||
                 movie.tagline.isNullOrBlank()
-
-        println(
-            """
-    tmdbId=${movie.tmdbId}
-    runtime=${movie.runtimeMinutes}
-    genres=${movie.genres?.size}
-    actors=${movie.actors?.size}
-    crew=${movie.crew?.size}
-    trailerKey=${movie.trailerKey}
-    studios=${movie.studios?.size}
-    countries=${movie.productionCountries?.size}
-    languages=${movie.spokenLanguages?.size}
-    first similar=${movie.similarMovies?.firstOrNull()}
-    similar count = ${movie.similarMovies?.size}
-    reviews=${movie.tmdbReviews?.size}
-    originalTitle=${movie.originalTitle}
-    tagline=${movie.tagline}
-    """.trimIndent()
-        )
-
-        print("NeedsTmdbEnrichment: $missingCore, $missingExtended, $missingIdentity")
 
         return missingCore || missingExtended || missingIdentity
     }
@@ -257,7 +236,11 @@ class MovieDetailScreenModel(
                     )
                 }
             } catch (e: Exception) {
-                println("Detail enrichment failed: ${e.message}")
+                AppLogger.exception(
+                    tag = "MovieDetailScreenModel",
+                    throwable = e,
+                    message = "enrich Movie, ${e.message}"
+                )
             } finally {
                 _isEnriching.value = false
             }
@@ -303,7 +286,6 @@ class MovieDetailScreenModel(
                     profilePath = it.profilePath
                 )
             }
-        print("similar movies: ${row.similarMovies}")
 
         return Movie(
             id = row.id.toInt(),

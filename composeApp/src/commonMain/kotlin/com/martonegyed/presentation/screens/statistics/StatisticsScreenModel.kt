@@ -9,6 +9,7 @@ import com.martonegyed.presentation.analytics.AnalyticsRepository
 import com.martonegyed.presentation.analytics.AnalyticsSharedModels
 import com.martonegyed.presentation.analytics.AnalyticsSnapshotCache
 import com.martonegyed.presentation.analytics.StatRange
+import com.martonegyed.presentation.components.common.CollectionEntityType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +19,13 @@ import kotlinx.coroutines.withContext
 enum class StatEntityType { DIRECTORS, ACTORS, GENRES, STUDIOS, COUNTRIES }
 enum class StatMetric { COUNT, AVG_RATING, WATCH_TIME, REVENUE }
 
+fun StatEntityType.toCollectionEntityType(): CollectionEntityType = when (this) {
+    StatEntityType.DIRECTORS -> CollectionEntityType.DIRECTORS
+    StatEntityType.ACTORS -> CollectionEntityType.ACTORS
+    StatEntityType.GENRES -> CollectionEntityType.GENRES
+    StatEntityType.STUDIOS -> CollectionEntityType.STUDIOS
+    StatEntityType.COUNTRIES -> CollectionEntityType.COUNTRIES
+}
 
 typealias EntityRow = AnalyticsSharedModels.AnalyticsEntityRow
 

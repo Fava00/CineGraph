@@ -196,7 +196,7 @@ class StatisticsScreen : Screen {
                                 navigator.push(
                                     MovieCollectionScreen(
                                         type = CollectionType.BY_ENTITY,
-                                        entityType = state.entityType,
+                                        entityType = state.entityType.toCollectionEntityType(),
                                         entityName = row.name,
                                         range = state.range,
                                         year = state.selectedYear,
@@ -254,7 +254,7 @@ class StatisticsScreen : Screen {
                         navigator.push(
                             MovieCollectionScreen(
                                 type = CollectionType.BY_ENTITY,
-                                entityType = state.entityType,
+                                entityType = state.entityType.toCollectionEntityType(),
                                 entityName = row.name,
                                 range = state.range,
                                 year = state.selectedYear,

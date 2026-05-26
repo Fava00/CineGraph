@@ -2,11 +2,13 @@ package com.martonegyed.presentation.screens.import
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.martonegyed.core.AppLogger
 import com.martonegyed.data.local.DataSyncManager
 import com.martonegyed.data.local.CsvImportService
 import com.martonegyed.data.remote.TmdbApiService
 import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.data.local.export.BackupExportService
+import com.martonegyed.data.local.export.ImdbExportService
 import com.martonegyed.data.local.export.LetterboxdExportService
 import io.github.vinceglb.filekit.core.PlatformFile
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -28,7 +30,27 @@ sealed interface ExportPayload {
         val fileName: String,
         val mimeType: String,
         val bytes: ByteArray
-    ) : ExportPayload
+    ) : ExportPayload {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other == null || this::class != other::class) return false
+
+            other as SingleFile
+
+            if (fileName != other.fileName) return false
+            if (mimeType != other.mimeType) return false
+            if (!bytes.contentEquals(other.bytes)) return false
+
+            return true
+        }
+
+        override fun hashCode(): Int {
+            var result = fileName.hashCode()
+            result = 31 * result + mimeType.hashCode()
+            result = 31 * result + bytes.contentHashCode()
+            return result
+        }
+    }
 
     data class MultiFile(
         val files: List<ExportFile>
@@ -39,14 +61,36 @@ data class ExportFile(
     val fileName: String,
     val mimeType: String,
     val bytes: ByteArray
-)
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other == null || this::class != other::class) return false
+
+        other as ExportFile
+
+        if (fileName != other.fileName) return false
+        if (mimeType != other.mimeType) return false
+        if (!bytes.contentEquals(other.bytes)) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = fileName.hashCode()
+        result = 31 * result + mimeType.hashCode()
+        result = 31 * result + bytes.contentHashCode()
+        return result
+    }
+}
 
 class ImportScreenModel(
     private val csvService: CsvImportService,
     private val tmdbService: TmdbApiService,
     private val database: CineGraphDatabase,
-    private val dataSyncManager: DataSyncManager, private val backupExportService: BackupExportService,
+    private val dataSyncManager: DataSyncManager,
+    private val backupExportService: BackupExportService,
     private val letterboxdExportService: LetterboxdExportService,
+    private val imdbExportService: ImdbExportService,
 ) : ScreenModel {
 
     private data class SourcePayload(
@@ -75,9 +119,6 @@ class ImportScreenModel(
         return "${platform.lowercase()}:${type.lowercase()}"
     }
 
-    fun isSourceStaged(platform: String, type: String): Boolean {
-        return _stagedSources.value.contains(sourceKey(platform, type))
-    }
 
     fun removeStagedSource(platform: String, type: String) {
         screenModelScope.launch {
@@ -98,14 +139,11 @@ class ImportScreenModel(
     fun stageMultipleLetterboxdFiles(files: List<PlatformFile>) {
         screenModelScope.launch {
             try {
-                importLog("stageMultipleLetterboxdFiles START fileCount=${files.size}")
                 _state.value = SyncState.Loading("Analyzing ${files.size} files...")
 
                 files.forEach { file ->
                     val fileName = file.name.lowercase()
-                    importLog("Picked file name=${file.name}")
                     if (fileName == "comments.csv" || fileName == "profile.csv" || !fileName.endsWith(".csv")) {
-                        importLog("Skipping file name=$fileName")
                         return@forEach
                     }
 
@@ -119,13 +157,10 @@ class ImportScreenModel(
                         "watchlist.csv" -> "Watchlist"
                         else -> "Lists"
                     }
-                    importLog("Detected Letterboxd type file=$fileName type=$type")
 
 
                     val content = file.readBytes().decodeToString()
-                    importLog("Decoded file=$fileName charCount=${content.length}")
                     val parsedData = csvService.parseCsv(content, "Letterboxd", type)
-                    importLog("Parsed file=$fileName parsedRows=${parsedData.size}")
 
 
                     val payloadKey = sourceKey("Letterboxd", type)
@@ -134,17 +169,22 @@ class ImportScreenModel(
                         type = type,
                         items = parsedData
                     )
-                    importLog("Stored payload key=$payloadKey itemCount=${parsedData.size}")
                 }
-
                 rebuildStagedState()
-                importLog("stageMultipleLetterboxdFiles DONE stagedSources=${_stagedSources.value} stagedCount=${_stagedCount.value} newMovies=${_newMoviesCount.value}")
                 _state.value = SyncState.Idle
             } catch (e: IllegalArgumentException) {
-                importLog("stageMultipleLetterboxdFiles IllegalArgumentException message=${e.message}")
+                AppLogger.exception(
+                    tag = "ImportScreenModel",
+                    throwable = e,
+                    message = "stageMultipleLetterboxdFiles invalid input, ${e.message}"
+                )
                 _state.value = SyncState.Error(e.message ?: "Invalid CSV format.")
             } catch (e: Exception) {
-                importLog("stageMultipleLetterboxdFiles Exception type=${e::class.simpleName} message=${e.message}")
+                AppLogger.exception(
+                    tag = "ImportScreenModel",
+                    throwable = e,
+                    message = "stageMultipleLetterboxdFiles failed, ${e.message}"
+                )
                 _state.value = SyncState.Error("An error occurred: ${e.message}")
             }
         }
@@ -153,14 +193,11 @@ class ImportScreenModel(
     fun stageSingleCsv(file: PlatformFile, type: String, platform: String) {
         screenModelScope.launch {
             try {
-                importLog("stageSingleCsv START file=${file.name} platform=$platform type=$type")
                 _state.value = SyncState.Loading("Parsing $platform $type...")
 
                 val content = file.readBytes().decodeToString()
-                importLog("Decoded file=${file.name} charCount=${content.length}")
 
                 val parsedData = csvService.parseCsv(content, platform, type)
-                importLog("Parsed file=${file.name} parsedRows=${parsedData.size}")
 
                 val payloadKey = sourceKey(platform, type)
                 stagedPayloads[sourceKey(platform, type)] = SourcePayload(
@@ -168,23 +205,28 @@ class ImportScreenModel(
                     type = type,
                     items = parsedData
                 )
-                importLog("Stored payload key=$payloadKey itemCount=${parsedData.size}")
 
                 rebuildStagedState()
-                importLog("stageSingleCsv DONE stagedSources=${_stagedSources.value} stagedCount=${_stagedCount.value} newMovies=${_newMoviesCount.value}")
                 _state.value = SyncState.Idle
             } catch (e: IllegalArgumentException) {
-                importLog("stageSingleCsv IllegalArgumentException file=${file.name} message=${e.message}")
+                AppLogger.exception(
+                    tag = "ImportScreenModel",
+                    throwable = e,
+                    message = "stageSingleCsv invalid csv file=${file.name} platform=$platform type=$type"
+                )
                 _state.value = SyncState.Error(e.message ?: "Invalid CSV format.")
             } catch (e: Exception) {
-                importLog("stageSingleCsv Exception file=${file.name} type=${e::class.simpleName} message=${e.message}")
+                AppLogger.exception(
+                    tag = "ImportScreenModel",
+                    throwable = e,
+                    message = "stageSingleCsv failed file=${file.name} platform=$platform type=$type"
+                )
                 _state.value = SyncState.Error("Failed to parse CSV: ${e.message}")
             }
         }
     }
 
-    private suspend fun recomputeNewMoviesCount() {
-        importLog("recomputeNewMoviesCount START stagedMovies=${stagedMovies.size}")
+    private fun recomputeNewMoviesCount() {
         val existing = database.movieEntityQueries
             .getAllMovieKeys()
             .executeAsList()
@@ -252,7 +294,12 @@ class ImportScreenModel(
                 existing["logs"] = logs
             } else {
                 val newMap = movieData.toMutableMap()
-                newMap["letterboxdUri"] = uri as Any? as Any
+                if (uri != null) {
+                    newMap["letterboxdUri"] = uri
+                }
+                if (imdb != null) {
+                    newMap["imdbId"] = imdb
+                }
                 newMap["year"] = yearInt
                 newMap["isWatched"] = isWatchedFile
                 newMap["inWatchlist"] = isWatchlistFile
@@ -302,6 +349,11 @@ class ImportScreenModel(
                 backupExportService.restoreJsonBackup(json)
                 _state.value = SyncState.Success("Backup restored successfully!")
             } catch (t: Throwable) {
+                AppLogger.exception(
+                    tag = "ImportScreenModel",
+                    throwable = t,
+                    message = "restoreBackup failed file=${file.name}"
+                )
                 _state.value = SyncState.Error("Restore failed: ${t.message}")
             }
         }
@@ -341,11 +393,30 @@ class ImportScreenModel(
                         )
                     }
 
+                    "IMDb" -> {
+                        _state.value = SyncState.Loading("Creating IMDb CSV files...")
+                        val bundle = imdbExportService.export()
+
+                        _exportPayload.emit(
+                            ExportPayload.MultiFile(
+                                files = listOf(
+                                    ExportFile("ratings.csv", "text/csv", bundle.ratingsCsv.encodeToByteArray()),
+                                    ExportFile("watchlist.csv", "text/csv", bundle.watchlistCsv.encodeToByteArray())
+                                )
+                            )
+                        )
+                    }
+
                     else -> {
                         _state.value = SyncState.Error("Unsupported export type: $platform")
                     }
                 }
             } catch (t: Throwable) {
+                AppLogger.exception(
+                    tag = "ImportScreenModel",
+                    throwable = t,
+                    message = "exportData failed platform=$platform, ${t.message}"
+                )
                 _state.value = SyncState.Error("Export failed: ${t.message}")
             }
         }
@@ -363,25 +434,17 @@ class ImportScreenModel(
         _state.value = SyncState.Idle
     }
 
-    private suspend fun rebuildStagedState() {
-        importLog("rebuildStagedState START payloadCount=${stagedPayloads.size}")
+    private fun rebuildStagedState() {
         stagedMovies.clear()
 
         stagedPayloads.values.forEach { payload ->
-            importLog("rebuild payload platform=${payload.platform} type=${payload.type} items=${payload.items.size}")
             mergeIntoStaged(parsedData = payload.items, type = payload.type)
         }
 
         _stagedSources.value = stagedPayloads.keys.toSet()
         _stagedCount.value = stagedMovies.size
-        importLog("rebuildStagedState before recompute stagedSources=${_stagedSources.value} stagedCount=${_stagedCount.value}")
 
         recomputeNewMoviesCount()
-        importLog("rebuildStagedState DONE stagedCount=${_stagedCount.value} newMovies=${_newMoviesCount.value}")
-    }
-
-    private fun importLog(message: String) {
-        println("IMPORT_DEBUG | $message")
     }
 
 }

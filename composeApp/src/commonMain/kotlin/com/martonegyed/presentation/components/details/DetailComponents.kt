@@ -40,7 +40,7 @@ fun SectionTitle(
         title,
         style = MaterialTheme.typography.titleMedium.copy(
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            color = MaterialTheme.colorScheme.onBackground,
             letterSpacing = 1.sp
         ),
         modifier = Modifier.padding(horizontal = paddingHorizontal)

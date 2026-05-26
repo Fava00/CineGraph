@@ -8,8 +8,8 @@ import com.martonegyed.core.util.mapCollectionRow
 import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.domain.model.Movie
 import com.martonegyed.presentation.analytics.StatRange
+import com.martonegyed.presentation.components.common.CollectionEntityType
 import com.martonegyed.presentation.screens.movies.CollectionType.*
-import com.martonegyed.presentation.screens.statistics.StatEntityType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,7 +75,7 @@ class MovieCollectionScreenModel(
         object Cached : CollectionRequest
 
         data class ByEntity(
-            val entityType: StatEntityType,
+            val entityType: CollectionEntityType,
             val entityName: String,
             val range: StatRange,
             val year: Int?,
@@ -134,7 +134,6 @@ class MovieCollectionScreenModel(
     private var dbJob: Job? = null
 
 
-
     init {
         println("🐛 DEBUG MODEL: ✨ ÚJ ScreenModel példány jött létre a memóriában!")
     }
@@ -173,7 +172,7 @@ class MovieCollectionScreenModel(
     }
 
     fun initCollectionForEntity(
-        entityType: StatEntityType,
+        entityType: CollectionEntityType,
         entityName: String,
         range: StatRange,
         year: Int?,
@@ -296,7 +295,7 @@ class MovieCollectionScreenModel(
                 database.movieEntityQueries.getWatchlistCollectionRows(::mapCollectionRow)
 
             CollectionRequest.Cached ->
-            database.movieEntityQueries.getCachedCollectionRows(::mapCollectionRow)
+                database.movieEntityQueries.getCachedCollectionRows(::mapCollectionRow)
 
             else -> error("Reactive loader called with non-reactive request: $request")
         }
@@ -330,7 +329,7 @@ class MovieCollectionScreenModel(
         val listTypeParam = _currentListType.value.name
 
         return when (request.entityType) {
-            StatEntityType.DIRECTORS -> loadRowsByPerson(
+            CollectionEntityType.DIRECTORS -> loadRowsByPerson(
                 listType = listTypeParam,
                 personName = request.entityName,
                 job = "Director",
@@ -338,7 +337,7 @@ class MovieCollectionScreenModel(
                 endDate = endDate
             )
 
-            StatEntityType.ACTORS -> loadRowsByPerson(
+            CollectionEntityType.ACTORS -> loadRowsByPerson(
                 listType = listTypeParam,
                 personName = request.entityName,
                 job = "Actor",
@@ -346,7 +345,7 @@ class MovieCollectionScreenModel(
                 endDate = endDate
             )
 
-            StatEntityType.GENRES -> loadRowsByFilter(
+            CollectionEntityType.GENRES -> loadRowsByFilter(
                 listType = listTypeParam,
                 filterType = MovieFilterType.GENRE,
                 filterName = request.entityName,
@@ -354,7 +353,7 @@ class MovieCollectionScreenModel(
                 endDate = endDate
             )
 
-            StatEntityType.STUDIOS -> loadRowsByFilter(
+            CollectionEntityType.STUDIOS -> loadRowsByFilter(
                 listType = listTypeParam,
                 filterType = MovieFilterType.STUDIO,
                 filterName = request.entityName,
@@ -362,10 +361,26 @@ class MovieCollectionScreenModel(
                 endDate = endDate
             )
 
-            StatEntityType.COUNTRIES -> loadRowsByFilter(
+            CollectionEntityType.COUNTRIES -> loadRowsByFilter(
                 listType = listTypeParam,
                 filterType = MovieFilterType.COUNTRY,
                 filterName = request.entityName,
+                startDate = startDate,
+                endDate = endDate
+            )
+
+            CollectionEntityType.SCREENWRITERS -> loadRowsByPerson(
+                listType = listTypeParam,
+                personName = request.entityName,
+                jobs = listOf("Screenplay", "Writer", "Story"),
+                startDate = startDate,
+                endDate = endDate
+            )
+
+            CollectionEntityType.CINEMATOGRAPHERS -> loadRowsByPerson(
+                listType = listTypeParam,
+                personName = request.entityName,
+                job = "Director of Photography",
                 startDate = startDate,
                 endDate = endDate
             )
@@ -452,6 +467,26 @@ class MovieCollectionScreenModel(
                 mapper = ::mapCollectionRow
             )
             .executeAsList()
+
+    private fun loadRowsByPerson(
+        listType: String,
+        personName: String,
+        jobs: List<String>,
+        startDate: String?,
+        endDate: String?
+    ): List<MovieCollectionRow> =
+        jobs.flatMap { job ->
+            database.movieEntityQueries
+                .getCollectionRowsByPersonAndDate(
+                    listType = listType,
+                    personName = personName,
+                    job = job,
+                    startDate = startDate,
+                    endDate = endDate,
+                    mapper = ::mapCollectionRow
+                )
+                .executeAsList()
+        }.distinctBy { it.id }
 
     private fun loadRowsByFilter(
         listType: String,

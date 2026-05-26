@@ -1,6 +1,7 @@
 package com.martonegyed.data.remote
 
 import com.martonegyed.BuildKonfig
+import com.martonegyed.core.AppLogger
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
@@ -211,7 +212,7 @@ class TmdbApiService(private val client: HttpClient) {
                 if (year > 0) parameter("primary_release_year", year)
             }.body()
         } catch (e: Exception) {
-            println("TMDB Search Error: ${e.message}")
+            AppLogger.exception("TMDBApiService", e, "searchmovie")
             null
         }
     }
@@ -223,7 +224,7 @@ class TmdbApiService(private val client: HttpClient) {
                 parameter("external_source", "imdb_id")
             }.body()
         } catch (e: Exception) {
-            println("TMDB Find Error: ${e.message}")
+            AppLogger.exception("TMDBApiService", e, "findByImdbId")
             null
         }
     }
@@ -236,7 +237,8 @@ class TmdbApiService(private val client: HttpClient) {
                 parameter("append_to_response", "credits,similar,reviews,videos,release_dates,translations")
             }.body()
         } catch (e: Exception) {
-            println("TMDB Details Error: ${e.message}")
+            AppLogger.exception("TMDBApiService", e, "getMovieDetails")
+
             null
         }
     }
@@ -249,7 +251,8 @@ class TmdbApiService(private val client: HttpClient) {
                 parameter("include_adult", false)
             }.body()
         } catch (e: Exception) {
-            println("TMDB Person Search Error: ${e.message}")
+            AppLogger.exception("TMDBApiService", e, "searchPerson")
+
             null
         }
     }
@@ -260,7 +263,8 @@ class TmdbApiService(private val client: HttpClient) {
                 parameter("api_key", apiKey)
             }.body()
         } catch (e: Exception) {
-            println("TMDB Genre List Error: ${e.message}")
+            AppLogger.exception("TMDBApiService", e, "getmoviegenres")
+
             null
         }
     }
@@ -314,7 +318,7 @@ class TmdbApiService(private val client: HttpClient) {
                 minVoteAverage?.let { parameter("vote_average.gte", it) }
             }.body()
         } catch (e: Exception) {
-            println("TMDB Discover Error: ${e.message}")
+            AppLogger.exception("TMDBApiService", e, "discovermovies")
             null
         }
     }

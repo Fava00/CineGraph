@@ -1,5 +1,6 @@
 package com.martonegyed.data.local
 
+import com.martonegyed.core.AppLogger
 import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.data.remote.TmdbApiService
 import com.martonegyed.data.remote.TmdbMovieDetailsResponse
@@ -77,6 +78,11 @@ class DataSyncManager(
                 enrichedCount.value = 0
                 refreshPendingEnrichment(force = true)
             } catch (e: Exception) {
+                AppLogger.exception(
+                    tag = "DataSyncManager",
+                    throwable = e,
+                    message = "startImportAndEnrich failed"
+                )
                 phase.value = Phase.IDLE
                 lastMessage.value = "Error during import/enrich: ${e.message}"
             }
@@ -272,7 +278,6 @@ class DataSyncManager(
     }
 
     private suspend fun enrichDatabaseWithTmdb() {
-        println("--- TMDB ENRICH START ---")
         enrichedCount.value = 0
 
         var totalEnrichedSoFar = 0
@@ -307,7 +312,11 @@ class DataSyncManager(
                             Pair(entity, null)
                         }
                     } catch (e: Exception) {
-                        println("TMDb error [${entity.name}]: ${e.message}")
+                        AppLogger.exception(
+                            tag = "DataSyncManager",
+                            throwable = e,
+                            message = "TMDb enrichment failed for movieId=${entity.id}, name=${entity.name}"
+                        )
                         Pair(entity, null)
                     }
                 }
@@ -425,7 +434,6 @@ class DataSyncManager(
             delay(500)
         }
 
-        println("--- TMDB ENRICH DONE, total: $totalEnrichedSoFar ---")
     }
 
     @OptIn(ExperimentalTime::class)

@@ -30,6 +30,7 @@ import com.martonegyed.core.util.toListDisplayModel
 import com.martonegyed.core.ui.adaptive.AdaptiveLayout
 import com.martonegyed.presentation.analytics.StatRange
 import com.martonegyed.presentation.components.common.AppDrawer
+import com.martonegyed.presentation.components.common.CollectionEntityType
 import com.martonegyed.presentation.components.common.cards.MovieCard
 import com.martonegyed.presentation.components.common.MovieListItem
 import com.martonegyed.presentation.screens.details.MovieDetailScreen
@@ -39,7 +40,7 @@ import kotlin.math.floor
 
 data class MovieCollectionScreen(
     val type: CollectionType = CollectionType.LIBRARY,
-    val entityType: StatEntityType? = null,
+    val entityType: CollectionEntityType? = null,
     val entityName: String? = null,
     val range: StatRange? = null,
     val year: Int? = null,

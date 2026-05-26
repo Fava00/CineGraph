@@ -2,6 +2,7 @@ package com.martonegyed.presentation.screens.collabSearch
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.martonegyed.core.AppLogger
 import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.data.remote.TmdbApiService
 import com.martonegyed.data.remote.TmdbGenre
@@ -393,6 +394,11 @@ class CollabSearchScreenModel(
                     results = filtered
                 )
             } catch (e: Exception) {
+                AppLogger.exception(
+                    tag = "Collab Search Screen",
+                    throwable = e,
+                    message = "Search failed, ${e.message}"
+                )
                 _uiState.value = _uiState.value.copy(
                     isSearching = false,
                     errorMessage = e.message ?: "Search failed."

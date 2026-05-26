@@ -2,6 +2,7 @@ package com.martonegyed.presentation.screens.moviePicker
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.martonegyed.core.AppLogger
 import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.data.remote.TmdbApiService
 import com.martonegyed.data.remote.TmdbGenre
@@ -173,6 +174,11 @@ class MoviePickerScreenModel(
                     availableGenres = response?.genres.orEmpty().sortedBy { it.name }
                 )
             } catch (e: Exception) {
+                AppLogger.exception(
+                    tag = "MoviePickerScreenModel",
+                    throwable = e,
+                    message = "Load Genres error: ${e.message}"
+                )
                 _uiState.value = _uiState.value.copy(
                     isLoadingMeta = false,
                     errorMessage = e.message ?: "Failed to load picker metadata."
