@@ -1,6 +1,6 @@
 # CineGraph
 Egy Kotlin Multiplatform alkalmazás filmes statisztikák követésére, adatok vizualizálására és új filmek felfedezésére.
-> Ez a projekt a Budapesti Műszaki és Gazdaságtudományi Egyetem (BME) MSc Önálló laboratórium 1. tárgyának keretein belül készült. Támogatott platformok: Android, iOS és Web.
+> Ez a projekt a Budapesti Műszaki és Gazdaságtudományi Egyetem (BME) MSc Önálló laboratórium 1. illetve 2. tárgyak keretein belül készült. Támogatott platformok: Android, iOS és Desktop.
 
 ## Funkciók
 
@@ -22,9 +22,62 @@ Egy Kotlin Multiplatform alkalmazás filmes statisztikák követésére, adatok 
 * **TMDB Okos Ajánló:** A felhasználó a TMDB API segítségével böngészhet/lekérhet filmajánlásokat a beállított beállítások (például évtized, műfaj, már megtekintett filmek stb.) alapján.
 * **Közös Munkák Keresője (Crossover Search):** A felhasználó megadhat két vagy több stábtagot (színészt vagy rendezőt), az alkalmazás pedig kilistázza az összes olyan filmet, amelyen ezek a személyek közösen dolgoztak.
 
+## Önálló laboratórium 2 funkciók
+
+0. **Adatmodell, Supabase-integráció** (10 óra)
+   
+  Repository réteg kialakítása, hogy a UI réteg számára ne számítson, hogy a lokális vagy szerver oldali adatbázisból érkezik az adat.
+   
+1. **Felhasználói fiók, többeszközös adattárolás** (20-25 óra)
+
+   A felhasználónak képes regisztrálni, bejelentkezni, majd másik eszközön ugyanazzal a CineGraph-fiókkal hozzáférhet a filmjeihez, értékeléseihez, watchlistjéhez és később a listáihoz.
+
+2. **Manuális film hozzáadás, filmnapló-kezelés, filmkeresése TMDB API-n direkten** (25-35 óra)
+
+   Lehetősége van a felhasználónak nem csak a saját, már hozzáadott filmjei között keresni, hanem a TMDB API-ját kihasználva, minden ott elérhető film között. Erre épít a további másik két funkció. A manuális film hozzáadás alatt a felhasználó hozzáadhat olyan filmet amit látott, és/vagy értékelni szeretne vagy akár csak a megnézendő listájára tenne. Ezt korábban csak a CSV fájlokon keresztül volt lehetősége.
+   A filmnapló-kezelés funkció teszi lehetővé majd a felhasználónak a már adatbázisában szereplő filmjének újabb naplóbejegyzését, vagyis megjelölheti, hogy újból látta, esetleg új értékelést helyezne rá vagy megnézendő listára helyezi azt.
+
+3. **Közösségi alapfunkciók** (20-30 óra)
+
+   - Felhasználó keresés:
+     
+     A felhasználókat a felhasználónevük azonosítja, mely segítségével egy másik felhasználó megkeresheti őket.
+   - Más felhasználó profiljának megtekintése:
+     
+     A felhasználók miután megkeresték a másik felhasználót megtekinthetik annak profilját. Itt alapvető statisztikákat érhetnek el az adott felhasználókról( illetve, ha barátként szerepelnek, akkor annak megnézett, értékelt és megnézendő listás filmjeit is megtekinthetik.)
+     
+   - Barátjelölés:
+  
+     A felhasználóknak lehetősége van egy mésik felhasználót bejelölni barátként, illetve egy ilyen jelölést elfogadni, melynek segítségével más funkcionalitási lehetőségek megnyílnak számára, mint például az előbb említett.
+
+4. **Értékelés összehasonlítása** (10-15 óra)
+
+    A felhasználók a barátaik értékeléseit egy adott filmnek a profilján is láthatják, illetve azt, ha a barátjuk megnézendő listára rakta, vagy csak szimplán látta, de nem értékelte. Ezenkívül összehasonlíthatja a kettejük által értékelt filmeket, melyek a legnagyobb eltérések, egyezések, valamint mely filmek szerepelnek mindkettejük megnézendő listáján.
+
+5. **Csoportos filmválasztás** (30-40 óra)
+
+    A felhasználóknak lehetősége van közös filmválasztásra. Az egyik felhasználó létrehoz egy szobát melybe barátait meghívhatja közvetlenül egy gombbal vagy akár egy kód megosztásával is.
+    Több mód között is választhat:
+     - minden felhasználó ajánl X db filmet
+     - A CineGraph generál X db filmet a felhasználók megnézendő listájáról
+     - A CineGraph a beállított paraméterek alapján ajánl X db filmet a felhasználóknak
+     - 
+    Az alkalmazásban már máshol látott csúsztatós módszer segítségével dönthetnek a felhasználók, hogy megnéznék, vagy semlegesek, vagy nem néznék meg az adott filmet, majd ez alapján az alkalmazás eldönti mely filmet nézzék a felhasználók.
+    
+    Ezen funkcióhoz a Supabase Realtime-ot tervezem használni, melynek segítségével a résztvevők rögtön láthatják a frissítéseket.
+
+6. **Listák létrehozása** (15-25 óra)
+
+    A felhasználóknak lehetőségük van saját, egyéni listák létrehozására. Ez abban különbözik a megnézendő listától, hogy itt a felhasználó rangsorolhatja is a listákat, valamint tetszőleges tematikában készítheti el, nevet adhat a listának, valamint leírást is készíthet hozzá. Más felhasználó is láthatja, valamint kedvelheti is a listát. (Későbbi változatban más felhasználóval együtt kezelheti)
+
+7. /+1 Ajánlórendszer (25-35 óra)
+
+    Extra funkcióként egy ajánlórendszer is bekerül az alkalmazásba, mely a felhasználók számára a már megnézett, értékelt, megnézendő listás filmjei alapján ajánl filmeket. Ez a funkció a csoportos filmválasztásba (is) beépül, és ezt a módot is választhatják a felhasználók.
+
+
 # English version
 A Kotlin Multiplatform application for tracking movie statistics, discovering new films, etc.
-> This project is mainly created for the MSc Independent Laboratory 1 course at Budapesti Műszaki és Gazdságtudományi Egyetem.
+> This project is mainly created for the MSc Independent Laboratory 1 and 2 courses at Budapesti Műszaki és Gazdságtudományi Egyetem.
 
 #### This application will support Android, iOS, and web browser.
 
