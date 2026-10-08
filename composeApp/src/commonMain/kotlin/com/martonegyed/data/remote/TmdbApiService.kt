@@ -5,8 +5,11 @@ import com.martonegyed.core.AppLogger
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.request.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlin.time.Duration.Companion.milliseconds
 
 @Serializable
 data class TmdbMovie(
@@ -19,7 +22,9 @@ data class TmdbMovie(
     @SerialName("vote_average") val voteAverage: Double? = null,
     @SerialName("vote_count") val voteCount: Int? = null,
     @SerialName("original_language") val originalLanguage: String? = null,
-    @SerialName("genre_ids") val genreIds: List<Int> = emptyList()
+    @SerialName("genre_ids") val genreIds: List<Int> = emptyList(),
+    @SerialName("original_title") val originalTitle: String? = null,
+    val alternativeTitles: List<String> = emptyList()
 )
 
 @Serializable
@@ -32,6 +37,9 @@ data class TmdbSearchResponse(
 data class TmdbFindResponse(
     @SerialName("movie_results") val movieResults: List<TmdbMovie>
 )
+
+@Serializable
+data class TmdbExternalIds(@SerialName("imdb_id") val imdbId: String? = null)
 
 @Serializable
 data class TmdbGenre(val id: Int, val name: String)
@@ -127,6 +135,22 @@ data class TmdbTranslation(
 data class TmdbTranslationData(val title: String = "")
 
 @Serializable
+data class TmdbAlternativeTitle(val title: String = "")
+
+@Serializable
+data class TmdbAlternativeTitles(val titles: List<TmdbAlternativeTitle> = emptyList())
+
+@Serializable
+data class TmdbTitleIdentity(
+    val id: Int,
+    @SerialName("alternative_titles") val alternativeTitles: TmdbAlternativeTitles? = null,
+    val translations: TmdbTranslationsResponse? = null
+) {
+    val titles: List<String> get() = (alternativeTitles?.titles.orEmpty().map { it.title } +
+        translations?.translations.orEmpty().map { it.data.title }).filter { it.isNotBlank() }.distinct()
+}
+
+@Serializable
 data class TmdbMovieDetailsResponse(
     val id: Int = 0,
     @SerialName("poster_path") val posterPath: String? = null,
@@ -152,7 +176,9 @@ data class TmdbMovieDetailsResponse(
     val reviews: TmdbReviewsResponse? = null,
     val videos: TmdbVideosResponse? = null,
     @SerialName("release_dates") val releaseDates: TmdbReleaseDatesResponse? = null,
-    val translations: TmdbTranslationsResponse? = null
+    val translations: TmdbTranslationsResponse? = null,
+    val title: String = "",
+    @SerialName("release_date") val releaseDate: String? = null
 ) {
     val trailerKey: String?
         get() = videos?.results
@@ -200,18 +226,41 @@ data class TmdbDiscoverMovieResponse(
 
 
 class TmdbApiService(private val client: HttpClient) {
+    private val titleCacheLock = kotlinx.coroutines.sync.Mutex()
+    private val titleCache = mutableMapOf<Int, List<String>>()
+
+    suspend fun getMovieAlternativeTitles(id: Int): List<String> {
+        titleCacheLock.lock()
+        try { titleCache[id]?.let { return it } } finally { titleCacheLock.unlock() }
+        val identity = limitedGet("$baseUrl/movie/$id") {
+            parameter("api_key", apiKey)
+            parameter("append_to_response", "alternative_titles,translations")
+        }.body<TmdbTitleIdentity>()
+        check(identity.id == id) { "TMDB returned a different movie" }
+        val titles = identity.titles
+        titleCacheLock.lock()
+        try {
+            if (titleCache.size >= 256) titleCache.remove(titleCache.keys.first())
+            titleCache[id] = titles
+        } finally { titleCacheLock.unlock() }
+        return titles
+    }
+    private val requestSlots = Semaphore(40)
+    private suspend fun limitedGet(url: String, block: HttpRequestBuilder.() -> Unit) =
+        requestSlots.withPermit { client.get(url, block) }
 
     private val apiKey = BuildKonfig.TMDB_API_KEY
     private val baseUrl = "https://api.themoviedb.org/3"
 
     suspend fun searchMovie(query: String, year: Int = 0): TmdbSearchResponse? {
         return try {
-            client.get("https://api.themoviedb.org/3/search/movie") {
+            limitedGet("https://api.themoviedb.org/3/search/movie") {
                 parameter("api_key", BuildKonfig.TMDB_API_KEY)
                 parameter("query", query)
                 if (year > 0) parameter("primary_release_year", year)
             }.body()
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             AppLogger.exception("TMDBApiService", e, "searchmovie")
             null
         }
@@ -219,24 +268,47 @@ class TmdbApiService(private val client: HttpClient) {
 
     suspend fun findByImdbId(imdbId: String): TmdbFindResponse? {
         return try {
-            client.get("https://api.themoviedb.org/3/find/$imdbId") {
+            limitedGet("https://api.themoviedb.org/3/find/$imdbId") {
                 parameter("api_key", BuildKonfig.TMDB_API_KEY)
                 parameter("external_source", "imdb_id")
             }.body()
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             AppLogger.exception("TMDBApiService", e, "findByImdbId")
+            null
+        }
+    }
+
+    suspend fun getMovieImdbId(tmdbId: Int): String? {
+        return try {
+            repeat(3) { attempt ->
+                val response = limitedGet("https://api.themoviedb.org/3/movie/$tmdbId/external_ids") {
+                    parameter("api_key", apiKey)
+                }
+                if (response.status.value == 429) {
+                    kotlinx.coroutines.delay((500L * (attempt + 1)).milliseconds)
+                } else {
+                    return response.body<TmdbExternalIds>().imdbId?.trim()
+                        ?.takeIf { it.matches(Regex("tt[0-9]+")) }
+                }
+            }
+            null
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            AppLogger.exception("TMDBApiService", e, "getMovieImdbId")
             null
         }
     }
 
     suspend fun getMovieDetails(tmdbId: Int): TmdbMovieDetailsResponse? {
         return try {
-            client.get("$baseUrl/movie/$tmdbId") {
+            limitedGet("$baseUrl/movie/$tmdbId") {
                 parameter("api_key", apiKey)
 
                 parameter("append_to_response", "credits,similar,reviews,videos,release_dates,translations")
             }.body()
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             AppLogger.exception("TMDBApiService", e, "getMovieDetails")
 
             null
@@ -245,12 +317,13 @@ class TmdbApiService(private val client: HttpClient) {
 
     suspend fun searchPerson(query: String): TmdbPersonSearchResponse? {
         return try {
-            client.get("$baseUrl/search/person") {
+            limitedGet("$baseUrl/search/person") {
                 parameter("api_key", apiKey)
                 parameter("query", query)
                 parameter("include_adult", false)
             }.body()
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             AppLogger.exception("TMDBApiService", e, "searchPerson")
 
             null
@@ -259,10 +332,11 @@ class TmdbApiService(private val client: HttpClient) {
 
     suspend fun getMovieGenres(): TmdbGenreListResponse? {
         return try {
-            client.get("$baseUrl/genre/movie/list") {
+            limitedGet("$baseUrl/genre/movie/list") {
                 parameter("api_key", apiKey)
             }.body()
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             AppLogger.exception("TMDBApiService", e, "getmoviegenres")
 
             null
@@ -283,7 +357,7 @@ class TmdbApiService(private val client: HttpClient) {
         page: Int = 1
     ): TmdbDiscoverMovieResponse? {
         return try {
-            client.get("$baseUrl/discover/movie") {
+            limitedGet("$baseUrl/discover/movie") {
                 parameter("api_key", apiKey)
                 parameter("include_adult", false)
                 parameter("include_video", false)
@@ -318,6 +392,7 @@ class TmdbApiService(private val client: HttpClient) {
                 minVoteAverage?.let { parameter("vote_average.gte", it) }
             }.body()
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             AppLogger.exception("TMDBApiService", e, "discovermovies")
             null
         }

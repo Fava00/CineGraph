@@ -4,11 +4,11 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.martonegyed.domain.model.Movie
 import com.martonegyed.presentation.analytics.AnalyticsFilters
-import com.martonegyed.presentation.analytics.AnalyticsRepository
+import com.martonegyed.domain.repository.AnalyticsRepository
 import com.martonegyed.presentation.analytics.AnalyticsSharedModels
-import com.martonegyed.presentation.analytics.AnalyticsSnapshotCache
 import com.martonegyed.presentation.analytics.StatRange
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -63,6 +63,7 @@ data class HabitsSummary(
 )
 
 object InsightsCache {
+    var sourceMovies: List<Movie>? = null
     var lastState: InsightsState? = null
     var computedCache: MutableMap<String, InsightComputedData> = mutableMapOf()
     var duoCache: MutableMap<String, List<DuoRow>> = mutableMapOf()
@@ -77,7 +78,8 @@ data class InsightComputedData(
 
 
 class InsightsScreenModel(
-    private val analyticsRepository: AnalyticsRepository
+    private val analyticsRepository: AnalyticsRepository,
+    private val calculationDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : ScreenModel {
 
     private val _state = MutableStateFlow(
@@ -89,29 +91,18 @@ class InsightsScreenModel(
     )
     val state = _state.asStateFlow()
 
+    private var calculationRevision = 0L
     private var allWatchedMovies: List<Movie> = emptyList()
     private var computedCache: MutableMap<String, InsightComputedData> = mutableMapOf()
     private var duoCache: MutableMap<String, List<DuoRow>> = mutableMapOf()
 
     init {
-        val cachedState = InsightsCache.lastState
-        val cachedSnapshot = AnalyticsSnapshotCache.snapshot
-
-        if (cachedState != null && cachedSnapshot != null && AnalyticsSnapshotCache.isFresh()) {
-            allWatchedMovies = cachedSnapshot.movies
-            computedCache = InsightsCache.computedCache.toMutableMap()
-            duoCache = InsightsCache.duoCache.toMutableMap()
-            _state.value = cachedState.copy(
-                isInitialLoading = false,
-                isRangeLoading = false,
-                isSectionLoading = false
-            )
-        } else {
-            loadInsights()
-        }
+        InsightsCache.lastState?.let { _state.value = it.copy(isInitialLoading = true) }
+        loadInsights()
     }
 
     fun setMode(mode: InsightMode) {
+        val revision = ++calculationRevision
         val current = _state.value
         val loadingState = current.copy(
             selectedMode = mode,
@@ -126,7 +117,7 @@ class InsightsScreenModel(
                 }
 
                 else -> {
-                    val computed = withContext(Dispatchers.Default) {
+                    val computed = withContext(calculationDispatcher) {
                         compute(
                             movies = allWatchedMovies,
                             state = loadingState,
@@ -134,6 +125,7 @@ class InsightsScreenModel(
                             availableMonthsByYear = loadingState.availableMonthsByYear
                         )
                     }
+                    if (revision != calculationRevision) return@launch
                     _state.value = computed.copy(isSectionLoading = false)
                     cacheState()
                 }
@@ -143,6 +135,7 @@ class InsightsScreenModel(
 
 
     fun setRange(range: StatRange, year: Int? = null, month: Int? = null) {
+        val revision = ++calculationRevision
         val current = _state.value
 
         val loadingState = current.copy(
@@ -154,7 +147,7 @@ class InsightsScreenModel(
         _state.value = loadingState
 
         screenModelScope.launch {
-            val computed = withContext(Dispatchers.Default) {
+            val computed = withContext(calculationDispatcher) {
                 compute(
                     movies = allWatchedMovies,
                     state = loadingState,
@@ -163,6 +156,7 @@ class InsightsScreenModel(
                 )
             }
 
+            if (revision != calculationRevision) return@launch
             if (computed.selectedMode == InsightMode.DUOS) {
                 reloadDuos(computed.copy(isSectionLoading = true))
             } else {
@@ -172,55 +166,26 @@ class InsightsScreenModel(
         }
     }
 
-    @OptIn(ExperimentalTime::class)
-    private fun loadInsights(forceRefresh: Boolean = false) {
+    private fun loadInsights() {
         screenModelScope.launch {
-            _state.value = _state.value.copy(
-                isInitialLoading = true,
-                isRangeLoading = true,
-                isSectionLoading = true
-            )
-
-            val snapshot = analyticsRepository.getSnapshot(forceRefresh)
-            allWatchedMovies = snapshot.movies
-
-            if (snapshot.movies.isEmpty()) {
-                val emptyState = InsightsState(
-                    isInitialLoading = false,
-                    isRangeLoading = false,
-                    isSectionLoading = false,
+            analyticsRepository.observeSnapshots().collect { snapshot ->
+                val revision = ++calculationRevision
+                allWatchedMovies = snapshot.viewings
+                _state.value = _state.value.copy(availableYears = snapshot.availableYears,
+                    availableMonthsByYear = snapshot.availableMonthsByYear)
+                computedCache.clear()
+                duoCache.clear()
+                val computed = withContext(calculationDispatcher) { compute(
+                    movies = snapshot.viewings,
+                    state = _state.value.copy(topDuos = emptyList()),
                     availableYears = snapshot.availableYears,
                     availableMonthsByYear = snapshot.availableMonthsByYear
-                )
-                _state.value = emptyState
-                InsightsCache.lastState = emptyState
-                return@launch
-            }
-
-            val computed = withContext(Dispatchers.Default) {
-                compute(
-                    movies = snapshot.movies,
-                    state = _state.value,
-                    availableYears = snapshot.availableYears,
-                    availableMonthsByYear = snapshot.availableMonthsByYear
-                )
-            }
-
-            if (computed.selectedMode == InsightMode.DUOS) {
-                _state.value = computed.copy(
-                    isInitialLoading = false,
-                    isRangeLoading = false,
-                    isSectionLoading = true
-                )
-                reloadDuos(_state.value)
-            } else {
-                val finalState = computed.copy(
-                    isInitialLoading = false,
-                    isRangeLoading = false,
-                    isSectionLoading = false
-                )
-                _state.value = finalState
-                cacheState()
+                ) }
+                if (revision == calculationRevision) {
+                    _state.value = computed
+                    if (computed.selectedMode == InsightMode.DUOS) reloadDuos(computed)
+                    else cacheState()
+                }
             }
         }
     }
@@ -280,16 +245,12 @@ class InsightsScreenModel(
             )
         }
 
-        val key = rangeKey(normalizedState)
-
-        val computed = computedCache.getOrPut(key) {
-            InsightComputedData(
-                ratingDistribution = computeRatingDistribution(filtered),
-                decadeBuckets = computeDecadeBreakdown(filtered),
+        val computed = InsightComputedData(
+                ratingDistribution = computeRatingDistribution(filtered.distinctBy { it.id }),
+                decadeBuckets = computeDecadeBreakdown(filtered.distinctBy { it.id }),
                 habitsSummary = computeHabits(filtered),
-                mapCountries = analyticsRepository.computeMapCountries(filtered)
+                mapCountries = AnalyticsFilters.computeMapCountries(filtered)
             )
-        }
 
         return normalizedState.copy(
             isInitialLoading = false,
@@ -409,24 +370,27 @@ class InsightsScreenModel(
     }
 
     fun setDuoType(type: DuoType) {
+        ++calculationRevision
         val newState = _state.value.copy(selectedDuoType = type)
         _state.value = newState
         reloadDuos(newState)
     }
     private fun reloadDuos(state: InsightsState) {
+        val revision = calculationRevision
         screenModelScope.launch {
             _state.value = state.copy(isSectionLoading = true)
 
             val key = duoKey(state)
-            val duos = duoCache[key] ?: withContext(Dispatchers.Default) {
+            val duos = withContext(calculationDispatcher) {
                 val filtered = AnalyticsFilters.filterMoviesByRange(
                     movies = allWatchedMovies,
                     range = state.selectedRange,
                     selectedYear = state.selectedYear,
                     selectedMonth = state.selectedMonth
                 )
-                computeDuosInMemory(filtered, state.selectedDuoType)
-            }.also { duoCache[key] = it }
+                computeDuosInMemory(filtered.distinctBy { it.id }, state.selectedDuoType)
+            }
+            if (revision != calculationRevision) return@launch
 
             _state.value = _state.value.copy(
                 isInitialLoading = false,
@@ -536,6 +500,7 @@ class InsightsScreenModel(
     }
 
     private fun cacheState() {
+        InsightsCache.sourceMovies = allWatchedMovies
         InsightsCache.lastState = _state.value
         InsightsCache.computedCache = computedCache.toMutableMap()
         InsightsCache.duoCache = duoCache.toMutableMap()

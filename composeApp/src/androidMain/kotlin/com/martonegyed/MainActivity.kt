@@ -11,6 +11,7 @@ import com.martonegyed.data.local.database.DatabaseDriverFactory
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.martonegyed.core.util.appContext = applicationContext
         setContent {
             App(driverFactory = DatabaseDriverFactory(applicationContext))
         }

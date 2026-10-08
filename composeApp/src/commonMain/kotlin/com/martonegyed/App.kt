@@ -20,7 +20,7 @@ import com.martonegyed.data.database.CineGraphDatabase
 import com.martonegyed.data.local.database.DatabaseDriverFactory
 import org.koin.dsl.module
 import coil3.compose.setSingletonImageLoaderFactory
-import com.martonegyed.data.local.DataSyncManager
+import com.martonegyed.domain.repository.ImportRepository
 
 import com.martonegyed.presentation.screens.import.ImportScreen
 import com.martonegyed.core.util.getAsyncImageLoader
@@ -42,11 +42,10 @@ fun App(driverFactory: DatabaseDriverFactory) {
             }
         )
     }) {
-        val dataSyncManager: DataSyncManager = koinInject()
-        val database: CineGraphDatabase = org.koin.compose.koinInject()
+        val importRepository: ImportRepository = koinInject()
 
         LaunchedEffect(Unit) {
-            dataSyncManager.refreshPendingEnrichment()
+            importRepository.refreshPendingEnrichment()
         }
 
         CineGraphTheme {

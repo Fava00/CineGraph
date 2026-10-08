@@ -23,6 +23,7 @@ import com.martonegyed.presentation.screens.moviePicker.MoviePickerScreen
 import com.martonegyed.presentation.screens.movies.CollectionType
 import com.martonegyed.presentation.screens.movies.MovieCollectionScreen
 import com.martonegyed.presentation.screens.randompicker.RandomPickerScreen
+import com.martonegyed.presentation.screens.search.MovieSearchScreen
 import com.martonegyed.presentation.screens.statistics.StatisticsScreen
 import com.martonegyed.presentation.screens.yearinreview.YearInReviewScreen
 
@@ -93,6 +94,13 @@ fun AppDrawer(
                         closeDrawer()
                     }
                 }
+            )
+
+            DrawerItem(
+                icon = Icons.Default.Search,
+                title = "Search movies",
+                isSelected = currentScreen is MovieSearchScreen,
+                onClick = { navigateTo(navigator, closeDrawer, currentScreen, MovieSearchScreen()) }
             )
 
             DrawerItem(

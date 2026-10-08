@@ -5,14 +5,15 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.martonegyed.domain.model.Movie
 import com.martonegyed.presentation.analytics.AnalyticsEntityAggregator
 import com.martonegyed.presentation.analytics.AnalyticsFilters
-import com.martonegyed.presentation.analytics.AnalyticsRepository
+import com.martonegyed.domain.repository.AnalyticsRepository
 import com.martonegyed.presentation.analytics.AnalyticsSharedModels
-import com.martonegyed.presentation.analytics.AnalyticsSnapshotCache
 import com.martonegyed.presentation.analytics.StatRange
 import com.martonegyed.presentation.components.common.CollectionEntityType
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -33,6 +34,9 @@ data class StatisticsState(
     val isLoading: Boolean = true,
 
     val totalMovies: Int = 0,
+    val totalViewings: Int = 0,
+    val undatedViewings: Int = 0,
+    val unknownRuntimeViewings: Int = 0,
     val totalHours: Double = 0.0,
     val averageRating: Double = 0.0,
     val totalRevenue: Long = 0L,
@@ -49,12 +53,14 @@ data class StatisticsState(
 )
 
 object StatisticsCache {
+    var sourceMovies: List<Movie>? = null
     var lastState: StatisticsState? = null
     var rowsCache: MutableMap<String, Map<StatEntityType, List<EntityRow>>> = mutableMapOf()
 }
 
 class StatisticsScreenModel(
-    private val analyticsRepository: AnalyticsRepository
+    private val analyticsRepository: AnalyticsRepository,
+    private val calculationDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : ScreenModel {
 
     private val _state = MutableStateFlow(StatisticsState())
@@ -66,49 +72,35 @@ class StatisticsScreenModel(
 
     init {
         val cachedState = StatisticsCache.lastState
-        val cachedSnapshot = AnalyticsSnapshotCache.snapshot
-
-        if (cachedState != null && cachedSnapshot != null && AnalyticsSnapshotCache.isFresh()) {
-            allWatchedMovies = cachedSnapshot.movies
-            rowsCache = StatisticsCache.rowsCache.toMutableMap()
-            _state.value = cachedState.copy(isLoading = false)
-        } else {
-            loadStatistics()
-        }
+        if (cachedState != null) _state.value = cachedState.copy(isLoading = true)
+        loadStatistics()
     }
 
-    private fun loadStatistics(forceRefresh: Boolean = false) {
+    private fun loadStatistics() {
         screenModelScope.launch {
             _state.value = _state.value.copy(isLoading = true)
 
-            val snapshot = analyticsRepository.getSnapshot(forceRefresh)
-            allWatchedMovies = snapshot.movies
-
-            if (snapshot.movies.isEmpty()) {
-                val emptyState = StatisticsState(
-                    isLoading = false,
-                    availableYears = snapshot.availableYears,
-                    availableMonthsByYear = snapshot.availableMonthsByYear,
-                    rows = emptyList()
-                )
-                _state.value = emptyState
-                StatisticsCache.lastState = emptyState
-                return@launch
+            analyticsRepository.observeSnapshots().collectLatest { snapshot ->
+                allWatchedMovies = snapshot.viewings
+                _state.value = _state.value.copy(availableYears = snapshot.availableYears,
+                    availableMonthsByYear = snapshot.availableMonthsByYear)
+                rowsCache.clear()
+                var input: StatisticsState
+                var finalState: StatisticsState
+                do {
+                    input = _state.value
+                    finalState = withContext(calculationDispatcher) {
+                        compute(
+                            movies = snapshot.viewings,
+                            state = input,
+                            availableYears = snapshot.availableYears,
+                            availableMonthsByYear = snapshot.availableMonthsByYear
+                        ).copy(isLoading = false)
+                    }
+                } while (_state.value !== input)
+                _state.value = finalState
+                cacheState()
             }
-
-            rowsCache.clear()
-
-            val finalState = withContext(Dispatchers.Default) {
-                compute(
-                    movies = snapshot.movies,
-                    state = _state.value,
-                    availableYears = snapshot.availableYears,
-                    availableMonthsByYear = snapshot.availableMonthsByYear
-                ).copy(isLoading = false)
-            }
-
-            _state.value = finalState
-            cacheState()
         }
     }
 
@@ -187,6 +179,9 @@ class StatisticsScreenModel(
             return normalizedState.copy(
                 isLoading = false,
                 totalMovies = 0,
+                totalViewings = 0,
+                undatedViewings = 0,
+                unknownRuntimeViewings = 0,
                 totalHours = 0.0,
                 averageRating = 0.0,
                 totalRevenue = 0L,
@@ -194,10 +189,11 @@ class StatisticsScreenModel(
             )
         }
 
-        val totalMinutes = filtered.sumOf { it.runtimeMinutes ?: 0 }
-        val ratings = filtered.mapNotNull { it.rating }
+        val totalMinutes = filtered.sumOf { (it.runtimeMinutes ?: 0).coerceAtLeast(0) }
+        val uniqueMovies = filtered.distinctBy { it.id }
+        val ratings = uniqueMovies.mapNotNull { it.rating }
         val averageRating = if (ratings.isNotEmpty()) ratings.average() else 0.0
-        val totalRevenue = filtered.sumOf { it.revenue ?: 0L }
+        val totalRevenue = uniqueMovies.sumOf { it.revenue ?: 0L }
 
         val baseRows = getBaseRows(filtered, normalizedState)
 
@@ -232,7 +228,10 @@ class StatisticsScreenModel(
 
         return normalizedState.copy(
             isLoading = false,
-            totalMovies = filtered.size,
+            totalMovies = uniqueMovies.size,
+            totalViewings = filtered.size,
+            undatedViewings = filtered.count { it.watchedDate == null },
+            unknownRuntimeViewings = filtered.count { (it.runtimeMinutes ?: 0) <= 0 },
             totalHours = totalMinutes / 60.0,
             averageRating = averageRating,
             totalRevenue = totalRevenue,
@@ -252,11 +251,6 @@ class StatisticsScreenModel(
         filtered: List<Movie>,
         state: StatisticsState
     ): List<EntityRow> {
-        val key = rangeKey(state)
-        val cachedForRange = rowsCache[key]
-
-        cachedForRange?.get(state.entityType)?.let { return it }
-
         val rows = when (state.entityType) {
             StatEntityType.DIRECTORS -> AnalyticsEntityAggregator.aggregate(
                 movies = filtered,
@@ -291,11 +285,11 @@ class StatisticsScreenModel(
             )
         }
 
-        rowsCache[key] = (cachedForRange ?: emptyMap()) + (state.entityType to rows)
         return rows
     }
 
     private fun cacheState() {
+        StatisticsCache.sourceMovies = allWatchedMovies
         StatisticsCache.lastState = _state.value
         StatisticsCache.rowsCache = rowsCache.toMutableMap()
     }

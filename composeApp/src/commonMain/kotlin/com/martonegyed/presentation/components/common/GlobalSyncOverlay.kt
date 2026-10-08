@@ -26,20 +26,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.martonegyed.data.local.DataSyncManager
+import com.martonegyed.domain.repository.ImportRepository
+import com.martonegyed.domain.repository.ImportPhase
 import org.koin.compose.koinInject
 
 @Composable
 fun GlobalSyncOverlay() {
-    val dataSyncManager: DataSyncManager = koinInject()
-    val phase by dataSyncManager.phase.collectAsState()
-    val importedCount by dataSyncManager.importedCount.collectAsState()
-    val importedTotal by dataSyncManager.importedTotal.collectAsState()
-    val enrichedCount by dataSyncManager.enrichedCount.collectAsState()
-    val enrichedTotal by dataSyncManager.enrichedTotal.collectAsState()
-    val message by dataSyncManager.lastMessage.collectAsState()
+    val importRepository: ImportRepository = koinInject()
+    val phase by importRepository.phase.collectAsState()
+    val importedCount by importRepository.importedCount.collectAsState()
+    val importedTotal by importRepository.importedTotal.collectAsState()
+    val enrichedCount by importRepository.enrichedCount.collectAsState()
+    val enrichedTotal by importRepository.enrichedTotal.collectAsState()
+    val message by importRepository.lastMessage.collectAsState()
 
-    if (phase == DataSyncManager.Phase.IDLE) return
+    if (phase == ImportPhase.IDLE) return
 
     Box(
         modifier = Modifier
@@ -70,15 +71,15 @@ fun GlobalSyncOverlay() {
                 ) {
                     Text(
                         text = when (phase) {
-                            DataSyncManager.Phase.IMPORTING -> "Importing movies"
-                            DataSyncManager.Phase.ENRICHING -> "Enriching from TMDb"
+                            ImportPhase.IMPORTING -> "Importing movies"
+                            ImportPhase.ENRICHING -> "Enriching from TMDb"
                             else -> ""
                         },
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
-                    TextButton(onClick = { dataSyncManager.cancelAll() }) {
+                    TextButton(onClick = { importRepository.cancelAll() }) {
                         Text("Cancel", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
                     }
                 }
@@ -103,7 +104,7 @@ fun GlobalSyncOverlay() {
                     val fraction = enrichedCount.toFloat() / enrichedTotal.coerceAtLeast(1)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "Enriched: $enrichedCount / $enrichedTotal",
+                        text = "Processed: $enrichedCount / $enrichedTotal",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )

@@ -1,13 +1,9 @@
 package com.martonegyed.presentation.screens.randompicker
 
-import app.cash.sqldelight.coroutines.asFlow
-import app.cash.sqldelight.coroutines.mapToList
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.martonegyed.core.util.mapCollectionRow
-import com.martonegyed.data.database.CineGraphDatabase
+import com.martonegyed.domain.repository.MovieCollectionRepository
 import com.martonegyed.domain.model.Movie
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,7 +17,7 @@ data class RandomPickerUiState(
 )
 
 class RandomPickerScreenModel(
-    private val database: CineGraphDatabase
+    private val repository: MovieCollectionRepository
 ) : ScreenModel {
 
     private val _state = MutableStateFlow(RandomPickerUiState())
@@ -37,10 +33,7 @@ class RandomPickerScreenModel(
         watchlistJob?.cancel()
 
         watchlistJob = screenModelScope.launch {
-            database.movieEntityQueries
-                .getWatchlistCollectionRows(::mapCollectionRow)
-                .asFlow()
-                .mapToList(Dispatchers.Default)
+            repository.observeWatchlistMovies()
                 .collect { rows ->
                     val movies = rows.map { row ->
                         row.toMovie(preferWatchlistDate = true)

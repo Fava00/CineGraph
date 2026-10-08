@@ -11,6 +11,8 @@ import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.martonegyed.core.util.revenueFormater
@@ -32,7 +34,7 @@ fun StatisticsHeroColumn(
             Modifier.fillMaxWidth().weight(1f),
             Icons.Default.Movie,
             value = state.totalMovies.toString(),
-            label = "Watched",
+            label = "Films",
 
             )
         HeroStatCard(
@@ -57,38 +59,55 @@ fun StatisticsHeroColumn(
             label = "Revenue",
 
             )
+        ViewingSummary(state)
     }
 }
 
 @Composable
 fun StatisticsHeroRow(state: StatisticsState) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        HeroStatCard(
-            modifier = Modifier.weight(1f),
-            icon = Icons.Default.Movie,
-            value = state.totalMovies.toString(),
-            label = "Watched"
-        )
-        HeroStatCard(
-            modifier = Modifier.weight(1f),
-            icon = Icons.Default.AccessTime,
-            value = "${state.totalHours.roundToDecimals(2)}h",
-            label = "Hours"
-        )
-        HeroStatCard(
-            modifier = Modifier.weight(1f),
-            icon = Icons.Default.Star,
-            value = if (state.averageRating > 0) state.averageRating.roundToDecimals(2).toString() else "-",
-            label = "Avg Rating"
-        )
-        HeroStatCard(
-            modifier = Modifier.weight(1f),
-            icon = Icons.Default.AttachMoney,
-            value = revenueFormater(state.totalRevenue),
-            label = "Revenue"
-        )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            HeroStatCard(
+                modifier = Modifier.weight(1f),
+                icon = Icons.Default.Movie,
+                value = state.totalMovies.toString(),
+                label = "Films"
+            )
+            HeroStatCard(
+                modifier = Modifier.weight(1f),
+                icon = Icons.Default.AccessTime,
+                value = "${state.totalHours.roundToDecimals(2)}h",
+                label = "Hours"
+            )
+            HeroStatCard(
+                modifier = Modifier.weight(1f),
+                icon = Icons.Default.Star,
+                value = if (state.averageRating > 0) state.averageRating.roundToDecimals(2).toString() else "-",
+                label = "Avg Rating"
+            )
+            HeroStatCard(
+                modifier = Modifier.weight(1f),
+                icon = Icons.Default.AttachMoney,
+                value = revenueFormater(state.totalRevenue),
+                label = "Revenue"
+            )
+        }
+        ViewingSummary(state)
     }
+}
+
+@Composable
+private fun ViewingSummary(state: StatisticsState) {
+    Text(
+        buildString {
+            append("${state.totalViewings} viewings")
+            if (state.undatedViewings > 0) append(" | ${state.undatedViewings} with unknown dates")
+            if (state.unknownRuntimeViewings > 0) append("\nWatch time excludes ${state.unknownRuntimeViewings} viewings with unknown runtime.")
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 }

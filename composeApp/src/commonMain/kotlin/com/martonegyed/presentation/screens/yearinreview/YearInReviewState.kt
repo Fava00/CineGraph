@@ -56,6 +56,7 @@ data class MilestoneMovieRow(
 
 data class YearHeroSummary(
     val filmCount: Int = 0,
+    val viewingCount: Int = 0,
     val hoursWatched: Int = 0,
     val averageRating: Double? = null,
     val totalRevenue: Long = 0L
@@ -104,6 +105,7 @@ fun emptyYearState(state: YearInReviewState): YearInReviewState =
         moviesByDay = emptyList(),
         firstMovie = null,
         lastMovie = null,
+        milestones = emptyList(),
         genreRankingByCount = emptyList(),
         genreRankingByAverageRating = emptyList(),
         centuryRankingByCount = emptyList(),

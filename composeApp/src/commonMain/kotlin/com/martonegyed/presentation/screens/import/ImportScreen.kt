@@ -14,6 +14,7 @@ import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -23,7 +24,8 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
-import com.martonegyed.data.local.DataSyncManager
+import com.martonegyed.domain.repository.ImportRepository
+import com.martonegyed.domain.repository.ImportPhase
 import com.martonegyed.core.ui.adaptive.AdaptiveLayout
 import com.martonegyed.core.ui.adaptive.AdaptiveScaffoldTokens
 import com.martonegyed.core.ui.adaptive.ImportScreenTokens
@@ -33,6 +35,12 @@ import com.martonegyed.presentation.components.common.ErrorView
 import com.martonegyed.presentation.components.common.LoadingView
 import com.martonegyed.presentation.components.common.SuccessView
 import com.martonegyed.presentation.components.importing.PlatformCard
+import com.martonegyed.presentation.components.importing.ReadyToImportCard
+import com.martonegyed.presentation.components.importing.TmdbCandidateCard
+import com.martonegyed.presentation.components.importing.TmdbReviewCardHeader
+import com.martonegyed.presentation.components.importing.SuggestedTmdbMatchesDialog
+import com.martonegyed.presentation.components.importing.CsvImportConfirmationDialog
+import com.martonegyed.presentation.components.importing.CsvSourceConflictDialog
 import io.github.vinceglb.filekit.compose.rememberDirectoryPickerLauncher
 import io.github.vinceglb.filekit.compose.rememberFilePickerLauncher
 import io.github.vinceglb.filekit.compose.rememberFileSaverLauncher
@@ -60,16 +68,38 @@ class ImportScreen : Screen {
         val navigator = LocalNavigator.currentOrThrow
         val screenModel = koinScreenModel<ImportScreenModel>()
         val state by screenModel.state.collectAsState()
+        val csvConfirmation by screenModel.csvConfirmation.collectAsState()
+        val csvReadBusy by screenModel.csvReadBusy.collectAsState()
+        val suggestionsOpen by screenModel.suggestionsOpen.collectAsState()
+        val suggestions by screenModel.suggestions.collectAsState()
+        val suggestionsLoading by screenModel.suggestionsLoading.collectAsState()
+        val suggestionsApplying by screenModel.suggestionsApplying.collectAsState()
+        val suggestionProgress by screenModel.suggestionProgress.collectAsState()
+        val sourceConflict by screenModel.sourceConflict.collectAsState()
+        sourceConflict?.let { conflict ->
+            CsvSourceConflictDialog(conflict, csvReadBusy, screenModel::resolveSourceConflict)
+        }
+        csvConfirmation?.let { assessment ->
+            CsvImportConfirmationDialog(assessment, csvReadBusy, screenModel::confirmCsvType, screenModel::cancelCsvReview)
+        }
         val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
         val scope = rememberCoroutineScope()
-        val dataSyncManager: DataSyncManager = koinInject()
-        val phase by dataSyncManager.phase.collectAsState()
-        val hasPending by dataSyncManager.hasPendingEnrichment.collectAsState(false)
-        val promptShown by dataSyncManager.resumePromptShown.collectAsState(false)
+        val importRepository: ImportRepository = koinInject()
+        val phase by importRepository.phase.collectAsState()
+        if (suggestionsOpen) SuggestedTmdbMatchesDialog(
+            suggestions, suggestionsLoading && phase == ImportPhase.IDLE, suggestionsApplying,
+            suggestionProgress.takeIf { phase == ImportPhase.IDLE },
+            screenModel::chooseSuggestedMatch, { screenModel.applySuggestedMatches(it) },
+            { screenModel.applySuggestedMatches() }, screenModel::closeSuggestedMatches,
+            canApply = phase == ImportPhase.IDLE
+        )
+        val hasPending by importRepository.hasPendingEnrichment.collectAsState(false)
+        val promptShown by importRepository.resumePromptShown.collectAsState(false)
 
         var selectedTabIndex by remember { mutableStateOf(0) }
 
         var pendingSingleFile by remember { mutableStateOf<ExportPayload.SingleFile?>(null) }
+        var pendingBackupName by remember { mutableStateOf<String?>(null) }
         var pendingMultiFiles by remember { mutableStateOf<List<ExportFile>>(emptyList()) }
         var currentQueuedFile by remember { mutableStateOf<ExportFile?>(null) }
 
@@ -79,12 +109,18 @@ class ImportScreen : Screen {
 
             if (file == null) {
                 pendingSingleFile = null
+                pendingBackupName = null
                 pendingMultiFiles = emptyList()
                 currentQueuedFile = null
                 screenModel.onExportCancelled()
             } else {
                 scope.launch {
                     when {
+                        pendingBackupName != null -> {
+                            pendingBackupName = null
+                            screenModel.writeBackup(file)
+                        }
+
                         singlePayload != null -> {
                             writePickedFile(file, singlePayload.bytes)
                             screenModel.onExportSaved("${singlePayload.fileName} exported")
@@ -99,7 +135,7 @@ class ImportScreen : Screen {
 
                             if (remaining.isEmpty()) {
                                 currentQueuedFile = null
-                                screenModel.onExportSaved("5 CSV files exported")
+                                screenModel.onExportSaved("CSV files exported")
                             } else {
                                 currentQueuedFile = remaining.first()
                             }
@@ -117,6 +153,14 @@ class ImportScreen : Screen {
             )
         }
 
+        LaunchedEffect(pendingBackupName) {
+            val name = pendingBackupName ?: return@LaunchedEffect
+            fileSaver.launch(
+                baseName = name.substringBeforeLast("."),
+                extension = name.substringAfterLast(".")
+            )
+        }
+
         LaunchedEffect(currentQueuedFile) {
             val file = currentQueuedFile ?: return@LaunchedEffect
             fileSaver.launch(
@@ -129,6 +173,10 @@ class ImportScreen : Screen {
         LaunchedEffect(Unit) {
             screenModel.exportPayload.collect { payload ->
                 when (payload) {
+                    is ExportPayload.BackupDestination -> {
+                        pendingBackupName = payload.fileName
+                    }
+
                     is ExportPayload.SingleFile -> {
                         pendingSingleFile = payload
                     }
@@ -141,7 +189,7 @@ class ImportScreen : Screen {
             }
         }
 
-        if (hasPending && phase == DataSyncManager.Phase.IDLE && !promptShown) {
+        if (hasPending && phase == ImportPhase.IDLE && !promptShown) {
             Surface(
                 color = colors.surface,
                 modifier = Modifier.fillMaxWidth()
@@ -163,13 +211,13 @@ class ImportScreen : Screen {
                         )
                     }
                     TextButton(onClick = {
-                        dataSyncManager.resumePromptShown.value = true
-                        dataSyncManager.startImportAndEnrich(stagedMovies = emptyList())
+                        importRepository.markResumePromptShown()
+                        importRepository.startImportAndEnrich(stagedMovies = emptyList())
                     }) {
                         Text("Resume", color = colors.inversePrimary)
                     }
                     TextButton(onClick = {
-                        dataSyncManager.resumePromptShown.value = true
+                        importRepository.markResumePromptShown()
                     }) {
                         Text("Not now", color = colors.onSurfaceVariant)
                     }
@@ -351,13 +399,15 @@ class ImportScreen : Screen {
         modifier: Modifier = Modifier,
         showInlineStatusCards: Boolean = true
     ) {
-        val dataSyncManager: DataSyncManager = koinInject()
+        val importRepository: ImportRepository = koinInject()
         val colors = MaterialTheme.colorScheme
-        val phase by dataSyncManager.phase.collectAsState()
-        val importedCount by dataSyncManager.importedCount.collectAsState()
-        val enrichedCount by dataSyncManager.enrichedCount.collectAsState()
-        val hasPending by dataSyncManager.hasPendingEnrichment.collectAsState()
+        val phase by importRepository.phase.collectAsState()
+        val importedCount by importRepository.importedCount.collectAsState()
+        val enrichedCount by importRepository.enrichedCount.collectAsState()
+        val hasPending by importRepository.hasPendingEnrichment.collectAsState()
+        val lastMessage by importRepository.lastMessage.collectAsState()
         val stagedSources by screenModel.stagedSources.collectAsState()
+        val stagedSummary by screenModel.stagedSummary.collectAsState()
         val scrollState = rememberScrollState()
         val isDesktop = importTokens.useTwoPaneLayout
 
@@ -410,28 +460,18 @@ class ImportScreen : Screen {
                 ),
             verticalArrangement = Arrangement.spacedBy(scaffoldTokens.sectionSpacing)
         ) {
-            if (showInlineStatusCards && phase != DataSyncManager.Phase.IDLE) {
-                Surface(
-                    color = colors.surfaceVariant,
-                    shape = RoundedCornerShape(20.dp),
-                    tonalElevation = 2.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "Background sync in progress (imported: $importedCount, enriched: $enrichedCount)",
-                        color = colors.onSurfaceVariant,
-                        fontSize = importTokens.bodyFontSize,
-                        modifier = Modifier.padding(importTokens.sectionCardPadding)
-                    )
-                }
+            if (stagedSummary.isNotEmpty()) {
+                ReadyToImportCard(stagedSummary)
             }
-
-            if (showInlineStatusCards && hasPending && phase == DataSyncManager.Phase.IDLE) {
+            if (showInlineStatusCards && hasPending && phase == ImportPhase.IDLE) {
                 PendingEnrichmentCard(
-                    onContinue = { dataSyncManager.startImportAndEnrich(emptyList()) },
+                    onContinue = { importRepository.startImportAndEnrich(emptyList()) },
+                    status = lastMessage,
                     compactAction = !isDesktop
                 )
             }
+
+            if (showInlineStatusCards) UnmatchedTmdbReviewCard(screenModel)
 
             PlatformCard(title = "Letterboxd", icon = Icons.Default.Movie) {
                 if (isDesktop) {
@@ -549,15 +589,6 @@ class ImportScreen : Screen {
                         onRemove = { screenModel.removeStagedSource("IMDb", "Watchlist") }
                     )
 
-                    StagedSourceChip(
-                        label = "Lists",
-                        isStaged = stagedSources.contains(sourceKey("IMDb", "Lists")),
-                        onPick = {
-                            currentImportType = "IMDb" to "Lists"
-                            csvPicker.launch()
-                        },
-                        onRemove = { screenModel.removeStagedSource("IMDb", "Lists") }
-                    )
                 }
             }
 
@@ -629,7 +660,7 @@ class ImportScreen : Screen {
         ) {
             PlatformCard(title = "Letterboxd Format", icon = Icons.Default.Movie) {
                 Text(
-                    "Create CSV files compatible with Letterboxd exports.",
+                    "Exports six files: reviews, watchlist, diary, ratings, watched, and an IMDb-ID companion for library films without a Letterboxd URI. The companion contains film identifiers only; ratings and history remain in the other files.",
                     color = colors.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -735,15 +766,15 @@ class ImportScreen : Screen {
         importTokens: ImportScreenTokens,
         modifier: Modifier = Modifier
     ) {
-        val dataSyncManager: DataSyncManager = koinInject()
+        val importRepository: ImportRepository = koinInject()
         val colors = MaterialTheme.colorScheme
-        val phase by dataSyncManager.phase.collectAsState()
-        val hasPending by dataSyncManager.hasPendingEnrichment.collectAsState()
-        val importedCount by dataSyncManager.importedCount.collectAsState()
-        val importedTotal by dataSyncManager.importedTotal.collectAsState()
-        val enrichedCount by dataSyncManager.enrichedCount.collectAsState()
-        val enrichedTotal by dataSyncManager.enrichedTotal.collectAsState()
-        val lastMessage by dataSyncManager.lastMessage.collectAsState()
+        val phase by importRepository.phase.collectAsState()
+        val hasPending by importRepository.hasPendingEnrichment.collectAsState()
+        val importedCount by importRepository.importedCount.collectAsState()
+        val importedTotal by importRepository.importedTotal.collectAsState()
+        val enrichedCount by importRepository.enrichedCount.collectAsState()
+        val enrichedTotal by importRepository.enrichedTotal.collectAsState()
+        val lastMessage by importRepository.lastMessage.collectAsState()
 
         val stagedCount by screenModel.stagedCount.collectAsState()
         val newMoviesCount by screenModel.newMoviesCount.collectAsState()
@@ -767,7 +798,7 @@ class ImportScreen : Screen {
                 )
             }
 
-            if (phase != DataSyncManager.Phase.IDLE) {
+            if (phase != ImportPhase.IDLE) {
                 DesktopSyncProgressCard(
                     phase = phase,
                     importedCount = importedCount,
@@ -775,42 +806,19 @@ class ImportScreen : Screen {
                     enrichedCount = enrichedCount,
                     enrichedTotal = enrichedTotal,
                     lastMessage = lastMessage,
-                    onCancel = { dataSyncManager.cancelAll() }
+                    onCancel = { importRepository.cancelAll() }
                 )
             }
 
-            if (phase != DataSyncManager.Phase.IDLE) {
-                Surface(
-                    color = colors.surfaceVariant,
-                    shape = RoundedCornerShape(20.dp),
-                    tonalElevation = 2.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(importTokens.sectionCardPadding),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "Background sync in progress",
-                            color = colors.onSurface,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = importTokens.titleFontSize
-                        )
-                        Text(
-                            text = "Imported: $importedCount · Enriched: $enrichedCount",
-                            color = colors.onSurfaceVariant,
-                            fontSize = importTokens.bodyFontSize
-                        )
-                    }
-                }
-            }
-
-            if (hasPending && phase == DataSyncManager.Phase.IDLE) {
+            if (hasPending && phase == ImportPhase.IDLE) {
                 PendingEnrichmentCard(
-                    onContinue = { dataSyncManager.startImportAndEnrich(emptyList()) },
+                    onContinue = { importRepository.startImportAndEnrich(emptyList()) },
+                    status = lastMessage,
                     compactAction = false
                 )
             }
+
+            UnmatchedTmdbReviewCard(screenModel)
 
             ExportView(
                 screenModel = screenModel,
@@ -897,8 +905,206 @@ class ImportScreen : Screen {
     }
 
     @Composable
+    private fun UnmatchedTmdbReviewCard(screenModel: ImportScreenModel) {
+        val open by screenModel.reviewOpen.collectAsState()
+        val movies by screenModel.unmatchedMovies.collectAsState()
+        val visible by screenModel.reviewCardVisible.collectAsState()
+        val selected by screenModel.reviewedMovie.collectAsState()
+        val candidates by screenModel.matchCandidates.collectAsState()
+        val busy by screenModel.matchReviewBusy.collectAsState()
+        val suggestions by screenModel.suggestions.collectAsState()
+        val preparing by screenModel.suggestionsLoading.collectAsState()
+        val preparationProgress by screenModel.suggestionProgress.collectAsState()
+        val message by screenModel.matchReviewMessage.collectAsState()
+        val importRepository: ImportRepository = koinInject()
+        val importPhase by importRepository.phase.collectAsState()
+        var query by remember(selected?.id) { mutableStateOf(selected?.name.orEmpty()) }
+        var page by remember { mutableIntStateOf(0) }
+        var confirmation by remember(selected?.id) { mutableStateOf<com.martonegyed.domain.model.TmdbMatchCandidate?>(null) }
+        var removal by remember { mutableStateOf<com.martonegyed.domain.model.UnmatchedMovie?>(null) }
+        var removalAll by remember { mutableStateOf<List<com.martonegyed.domain.model.UnmatchedMovie>?>(null) }
+        var tmdbUrl by remember(selected?.id) { mutableStateOf("") }
+        var browserError by remember(selected?.id) { mutableStateOf<String?>(null) }
+        val uriHandler = LocalUriHandler.current
+
+        if (movies.isEmpty() || !visible) return
+
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                TmdbReviewCardHeader(
+                    count = movies.size,
+                    readyCount = suggestions.size,
+                    preparing = preparing,
+                    syncing = importPhase != ImportPhase.IDLE,
+                    progress = preparationProgress,
+                    canReview = !busy,
+                    canManage = !busy && importPhase == ImportPhase.IDLE,
+                    onSuggestions = screenModel::openSuggestedMatches,
+                    onRefresh = screenModel::refreshSuggestedMatches,
+                    onRemoveAll = { removalAll = movies.toList() },
+                    onReview = screenModel::openMatchReview,
+                    reviewOpen = open
+                )
+                if (open) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(
+                            onClick = screenModel::retryUnmatchedMovies,
+                            enabled = importPhase == ImportPhase.IDLE && !busy
+                        ) { Text("Retry matching") }
+                        TextButton(onClick = screenModel::closeMatchReview) { Text("Close") }
+                    }
+                    message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    if (selected == null) {
+                        val lastPage = ((movies.size - 1).coerceAtLeast(0)) / 10
+                        val visiblePage = page.coerceAtMost(lastPage)
+                        val start = visiblePage * 10
+                        movies.drop(start).take(10).forEach { movie ->
+                            Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("${movie.name} (${movie.year})", fontWeight = FontWeight.SemiBold,
+                                        style = MaterialTheme.typography.bodyLarge)
+                                    val details = buildList {
+                                        movie.imdbId?.let { add("IMDb $it") }
+                                        if (movie.isWatched) add("Watched")
+                                        if (movie.inWatchlist) add("Watchlist")
+                                        if (movie.logCount > 0) add("${movie.logCount} logs")
+                                        if (movie.listCount > 0) add("${movie.listCount} lists")
+                                    }
+                                    if (details.isNotEmpty()) Text(details.joinToString(" · "),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(onClick = { screenModel.selectUnmatchedMovie(movie) },
+                                            enabled = !busy && importPhase == ImportPhase.IDLE) { Text("Find match") }
+                                        TextButton(onClick = { removal = movie },
+                                            enabled = !busy && importPhase == ImportPhase.IDLE,
+                                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+                                            Text("Remove")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (movies.size > 10) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(onClick = { page = visiblePage - 1 }, enabled = visiblePage > 0) { Text("Previous") }
+                                Text("Page ${visiblePage + 1} of ${(movies.size + 9) / 10}",
+                                    style = MaterialTheme.typography.bodySmall)
+                                TextButton(onClick = { page = visiblePage + 1 }, enabled = (visiblePage + 1) * 10 < movies.size) { Text("Next") }
+                            }
+                        }
+                    } else {
+                        Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text("${selected!!.name} (${selected!!.year})", fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.bodyLarge)
+                                selected!!.imdbId?.let { Text("IMDb $it", style = MaterialTheme.typography.bodySmall) }
+                                selected!!.letterboxdUri?.takeIf {
+                                    Regex("^https://(?:boxd\\.it|(?:www\\.)?letterboxd\\.com)/[^\\s]*$", RegexOption.IGNORE_CASE).matches(it)
+                                }?.let { url ->
+                                    TextButton(onClick = {
+                                        try { uriHandler.openUri(url); browserError = null }
+                                        catch (e: Exception) { browserError = "Could not open Letterboxd: ${e.message}" }
+                                    }) { Text("Open on Letterboxd") }
+                                }
+                                browserError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                                Text("${selected!!.logCount} logs · ${selected!!.listCount} lists",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(onClick = screenModel::backToUnmatchedMovies) { Text("Back to queue") }
+                                    TextButton(onClick = { removal = selected },
+                                        enabled = !busy && importPhase == ImportPhase.IDLE,
+                                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+                                        Text("Remove movie")
+                                    }
+                                }
+                            }
+                        }
+                        OutlinedTextField(
+                            value = tmdbUrl, onValueChange = { tmdbUrl = it },
+                            label = { Text("TMDB movie URL") }, singleLine = true,
+                            supportingText = { Text("Follow the TMDB link on Letterboxd, then paste its movie URL here.") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedButton(onClick = { screenModel.loadTmdbUrl(tmdbUrl) },
+                            enabled = !busy && importPhase == ImportPhase.IDLE && tmdbUrl.isNotBlank()) { Text("Load movie from URL") }
+                        Text("Search TMDb by title", style = MaterialTheme.typography.titleSmall)
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            label = { Text("Search TMDb movie title") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Button(onClick = { screenModel.searchMatchCandidates(query) }, enabled = !busy && importPhase == ImportPhase.IDLE && query.isNotBlank()) {
+                            Text(if (busy) "Searching..." else "Search movies")
+                        }
+                        candidates.take(10).forEach { candidate ->
+                            TmdbCandidateCard(candidate, !busy && importPhase == ImportPhase.IDLE) { confirmation = candidate }
+                        }
+                    }
+                }
+            }
+        }
+
+        confirmation?.let { candidate ->
+            AlertDialog(
+                onDismissRequest = { confirmation = null },
+                title = { Text("Confirm TMDb match") },
+                text = { Text("Link ${selected?.name} (${selected?.year}) to ${candidate.title} (${candidate.year ?: "year unknown"})? Existing ratings, reviews and logs will stay with this movie.") },
+                confirmButton = {
+                    TextButton(onClick = { confirmation = null; screenModel.confirmMatch(candidate) }) { Text("Link movie") }
+                },
+                dismissButton = { TextButton(onClick = { confirmation = null }) { Text("Cancel") } }
+            )
+        }
+        removalAll?.let { snapshot ->
+            AlertDialog(
+                onDismissRequest = { removalAll = null },
+                title = { Text("Remove all ${snapshot.size} unmatched entries?") },
+                text = { Text("This permanently deletes these entries from this device, including ${snapshot.sumOf { it.logCount }} viewing/rating logs, reviews, watchlist status, and ${snapshot.sumOf { it.listCount }} custom-list entries. It does not verify that they are series. Matched movies are kept.") },
+                confirmButton = {
+                    TextButton(onClick = { removalAll = null; screenModel.removeAllUnmatchedMovies(snapshot) },
+                        enabled = !busy && importPhase == ImportPhase.IDLE,
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Remove permanently") }
+                },
+                dismissButton = { TextButton(onClick = { removalAll = null }) { Text("Keep entries") } }
+            )
+        }
+        removal?.let { movie ->
+            AlertDialog(
+                onDismissRequest = { removal = null },
+                title = { Text("Remove ${movie.name}?") },
+                text = {
+                    Text(
+                        "This permanently removes the movie from this device, including ${movie.logCount} viewing/rating logs, " +
+                            "watchlist status, credits, and entries in ${movie.listCount} custom lists. " +
+                            "Use this only if you do not want the title in your library."
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = { removal = null; screenModel.removeUnmatchedMovie(movie) },
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) { Text("Remove permanently") }
+                },
+                dismissButton = { TextButton(onClick = { removal = null }) { Text("Keep movie") } }
+            )
+        }
+    }
+
+    @Composable
     private fun PendingEnrichmentCard(
         onContinue: () -> Unit,
+        status: String?,
         compactAction: Boolean
     ) {
         val colors = MaterialTheme.colorScheme
@@ -919,6 +1125,12 @@ class ImportScreen : Screen {
                     fontWeight = FontWeight.Bold
                 )
 
+                if (status?.startsWith("Enrichment processed") == true ||
+                    status?.startsWith("Error during import/enrich") == true
+                ) {
+                    Text(status, color = colors.onErrorContainer)
+                }
+
                 Button(
                     onClick = onContinue,
                     modifier = if (compactAction) Modifier else Modifier.widthIn(min = 180.dp, max = 240.dp),
@@ -936,7 +1148,7 @@ class ImportScreen : Screen {
 
     @Composable
     private fun DesktopSyncProgressCard(
-        phase: DataSyncManager.Phase,
+        phase: ImportPhase,
         importedCount: Int,
         importedTotal: Int,
         enrichedCount: Int,
@@ -973,9 +1185,9 @@ class ImportScreen : Screen {
                 ) {
                     Text(
                         text = when (phase) {
-                            DataSyncManager.Phase.IMPORTING -> "Importing"
-                            DataSyncManager.Phase.ENRICHING -> "Enriching from TMDb"
-                            DataSyncManager.Phase.IDLE -> "Idle"
+                            ImportPhase.IMPORTING -> "Importing"
+                            ImportPhase.ENRICHING -> "Enriching from TMDb"
+                            ImportPhase.IDLE -> "Idle"
                         },
                         fontWeight = FontWeight.Bold,
                         color = colors.onSurface
@@ -1003,7 +1215,7 @@ class ImportScreen : Screen {
 
                 if (enrichedTotal > 0) {
                     Text(
-                        "Enriched: $enrichedCount / $enrichedTotal",
+                        "Processed: $enrichedCount / $enrichedTotal",
                         color = colors.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )

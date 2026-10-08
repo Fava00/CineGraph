@@ -5,6 +5,7 @@ import com.martonegyed.domain.model.Movie
 object AnalyticsEntityAggregator {
 
     private data class Acc(
+        val movieIds: MutableSet<Int> = mutableSetOf(),
         var count: Int = 0,
         var sumRating: Double = 0.0,
         var ratingCount: Int = 0,
@@ -36,13 +37,15 @@ object AnalyticsEntityAggregator {
                 .forEach { (name, photoPath) ->
                     val acc = map.getOrPut(name) { Acc() }
 
-                    acc.count++
-                    if (rating != null) {
-                        acc.sumRating += rating
-                        acc.ratingCount++
+                    if (acc.movieIds.add(movie.id)) {
+                        acc.count++
+                        if (rating != null) {
+                            acc.sumRating += rating
+                            acc.ratingCount++
+                        }
+                        acc.totalRevenue += revenue
                     }
                     acc.totalMinutes += minutes
-                    acc.totalRevenue += revenue
 
                     if (acc.photoPath == null && !photoPath.isNullOrBlank()) {
                         acc.photoPath = photoPath

@@ -1,0 +1,16 @@
+DROP VIEW CurrentMovieRating;
+
+CREATE VIEW CurrentMovieRating AS
+SELECT log.movieId, log.rating, COALESCE(log.watchedDate, log.ratedDate) AS effectiveDate, log.stableId
+FROM MovieLogEntity log
+WHERE log.id = (
+    SELECT candidate.id FROM MovieLogEntity candidate
+    WHERE candidate.movieId = log.movieId
+      AND candidate.rating BETWEEN 0.5 AND 5.0
+      AND candidate.rating * 2 = CAST(candidate.rating * 2 AS INTEGER)
+    ORDER BY COALESCE(candidate.watchedDate, candidate.ratedDate) DESC,
+        CASE WHEN candidate.sourceType = 'MANUAL_RATING' THEN 1 ELSE 0 END DESC,
+        CASE WHEN candidate.sourceType = 'MANUAL_RATING' THEN julianday(candidate.createdAt) ELSE NULL END DESC,
+        candidate.stableId DESC
+    LIMIT 1
+);

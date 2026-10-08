@@ -1,13 +1,13 @@
 package com.martonegyed.presentation.screens.collabSearch
 
+import com.martonegyed.domain.repository.CrossoverRepository
+import com.martonegyed.domain.model.PersonRole
+import com.martonegyed.domain.model.MovieGenre
+import com.martonegyed.domain.model.CrossoverMovie
+import com.martonegyed.domain.model.CrossoverRequest
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.martonegyed.core.AppLogger
-import com.martonegyed.data.database.CineGraphDatabase
-import com.martonegyed.data.remote.TmdbApiService
-import com.martonegyed.data.remote.TmdbGenre
-import com.martonegyed.data.remote.TmdbMovie
-import com.martonegyed.data.remote.TmdbPerson
 import com.martonegyed.domain.model.PersonSuggestion
 import com.martonegyed.domain.model.SelectedPerson
 import com.martonegyed.domain.model.SuggestionSource
@@ -16,20 +16,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-
-enum class PersonRole(
-    val localJob: String,
-    val tmdbDepartment: String
-) {
-    ACTOR(
-        localJob = "Actor",
-        tmdbDepartment = "Acting"
-    ),
-    DIRECTOR(
-        localJob = "Director",
-        tmdbDepartment = "Directing"
-    )
-}
 
 data class CollabSearchUiState(
     val actorInput: String = "",
@@ -42,7 +28,7 @@ data class CollabSearchUiState(
     val showActorSuggestions: Boolean = false,
     val showDirectorSuggestions: Boolean = false,
 
-    val availableGenres: List<TmdbGenre> = emptyList(),
+    val availableGenres: List<MovieGenre> = emptyList(),
     val selectedGenreIds: Set<Int> = emptySet(),
     val minYear: Int = 1888,
     val maxYear: Int = 2026,
@@ -51,15 +37,14 @@ data class CollabSearchUiState(
     val isLoadingGenres: Boolean = false,
     val isSearching: Boolean = false,
     val errorMessage: String? = null,
-    val results: List<TmdbMovie> = emptyList()
+    val results: List<CrossoverMovie> = emptyList()
 ) {
     val canSearch: Boolean
         get() = selectedActors.size >= 2 || (selectedActors.isNotEmpty() && selectedDirectors.isNotEmpty())
 }
 
 class CollabSearchScreenModel(
-    private val tmdbApiService: TmdbApiService,
-    private val database: CineGraphDatabase
+    private val repository: CrossoverRepository
 ) : ScreenModel {
     private val _uiState = MutableStateFlow(CollabSearchUiState())
     val uiState = _uiState.asStateFlow()
@@ -158,7 +143,7 @@ class CollabSearchScreenModel(
         }
 
         val job = screenModelScope.launch {
-            val local = loadLocalSuggestions(role, trimmed)
+            val local = repository.getLocalSuggestions(role, trimmed)
 
             if (local.size >= 5) {
                 if (currentInput(role).trim() != trimmed) return@launch
@@ -174,20 +159,7 @@ class CollabSearchScreenModel(
 
             if (currentInput(role).trim() != trimmed) return@launch
 
-            val remote = tmdbApiService.searchPerson(trimmed)
-                ?.results
-                .orEmpty()
-                .filter {
-                    it.knownForDepartment == null ||
-                            it.knownForDepartment.equals(role.tmdbDepartment, ignoreCase = true)
-                }
-                .map {
-                    PersonSuggestion(
-                        name = it.name,
-                        tmdbPersonId = it.id,
-                        source = SuggestionSource.TMDB
-                    )
-                }
+            val remote = repository.getRemoteSuggestions(role, trimmed)
             if (currentInput(role).trim() != trimmed) return@launch
 
             val merged = mergeSuggestions(local, remote)
@@ -300,10 +272,10 @@ class CollabSearchScreenModel(
         screenModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingGenres = true, errorMessage = null)
 
-            val response = tmdbApiService.getMovieGenres()
+            val genres = repository.getGenres()
             _uiState.value = _uiState.value.copy(
                 isLoadingGenres = false,
-                availableGenres = response?.genres.orEmpty()
+                availableGenres = genres
             )
         }
     }
@@ -334,66 +306,17 @@ class CollabSearchScreenModel(
             )
 
             try {
-                val actorPeople = resolvePeople(
-                    selectedPeople = _uiState.value.selectedActors,
-                    expectedDepartment = "Acting"
-                )
-
-                val directorPeople = resolvePeople(
-                    selectedPeople = _uiState.value.selectedDirectors,
-                    expectedDepartment = "Directing"
-                )
-
-                if (actorPeople.size != _uiState.value.selectedActors.size) {
-                    _uiState.value = _uiState.value.copy(
-                        isSearching = false,
-                        errorMessage = "Could not find one or more actors."
-                    )
-                    return@launch
-                }
-
-                if (directorPeople.size != _uiState.value.selectedDirectors.size) {
-                    _uiState.value = _uiState.value.copy(
-                        isSearching = false,
-                        errorMessage = "Could not find one or more directors."
-                    )
-                    return@launch
-                }
-
-                val discovered = mutableListOf<TmdbMovie>()
-                val selectedGenres = _uiState.value.selectedGenreIds.toList()
-
-                for (page in 1..3) {
-                    val response = tmdbApiService.discoverMovies(
-                        castIds = actorPeople.map { it.id },
-                        crewIds = directorPeople.map { it.id },
-                        includedGenreIds = selectedGenres,
-                        fromYear = _uiState.value.selectedStartYear,
-                        toYear = _uiState.value.selectedEndYear,
-                        page = page,
-                    ) ?: continue
-
-                    if (response.results.isEmpty()) break
-                    discovered += response.results
-                    if (page >= response.totalPages) break
-                }
-
-                val uniqueDiscovered = discovered.distinctBy { it.id }
-
-                val filtered = uniqueDiscovered.filter { movie ->
-                    movieMatchesAllCriteria(
-                        movieId = movie.id,
-                        actorNames = _uiState.value.selectedActors,
-                        directorNames = _uiState.value.selectedDirectors,
-                        selectedGenreIds = _uiState.value.selectedGenreIds
-                    )
-                }
+                val filtered = repository.search(CrossoverRequest(
+                    state.selectedActors, state.selectedDirectors, state.selectedGenreIds,
+                    state.selectedStartYear, state.selectedEndYear
+                ))
 
                 _uiState.value = _uiState.value.copy(
                     isSearching = false,
                     results = filtered
                 )
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 AppLogger.exception(
                     tag = "Collab Search Screen",
                     throwable = e,
@@ -405,88 +328,6 @@ class CollabSearchScreenModel(
                 )
             }
         }
-    }
-
-    private suspend fun resolvePeople(
-        selectedPeople: List<SelectedPerson>,
-        expectedDepartment: String
-    ): List<TmdbPerson> {
-        return selectedPeople.mapNotNull { selected ->
-            selected.tmdbPersonId?.let { knownId ->
-                return@mapNotNull TmdbPerson(
-                    id = knownId,
-                    name = selected.name,
-                    knownForDepartment = expectedDepartment
-                )
-            }
-
-            val query = selected.name.trim()
-            if (query.isBlank()) return@mapNotNull null
-
-            val results = tmdbApiService.searchPerson(query)?.results.orEmpty()
-
-            results.firstOrNull {
-                it.name.equals(query, ignoreCase = true) &&
-                        (it.knownForDepartment == null ||
-                                it.knownForDepartment.equals(expectedDepartment, ignoreCase = true))
-            } ?: results.firstOrNull {
-                it.knownForDepartment == null ||
-                        it.knownForDepartment.equals(expectedDepartment, ignoreCase = true)
-            } ?: results.firstOrNull()
-        }
-    }
-
-    private suspend fun movieMatchesAllCriteria(
-        movieId: Int,
-        actorNames: List<SelectedPerson>,
-        directorNames: List<SelectedPerson>,
-        selectedGenreIds: Set<Int>
-    ): Boolean {
-        val details = tmdbApiService.getMovieDetails(movieId) ?: return false
-
-        val castNames = details.credits?.cast
-            ?.map { it.name.trim().lowercase() }
-            .orEmpty()
-            .toSet()
-
-        val directorSet = details.credits?.crew
-            ?.filter { it.job.equals("Director", ignoreCase = true) }
-            ?.map { it.name.trim().lowercase() }
-            .orEmpty()
-            .toSet()
-
-        val requiredActors = actorNames.map { it.name.trim().lowercase() }
-        val requiredDirectors = directorNames.map { it.name.trim().lowercase() }
-
-        val actorsMatch = requiredActors.all { it in castNames }
-        val directorsMatch = requiredDirectors.all { it in directorSet }
-
-        val genresMatch = if (selectedGenreIds.isEmpty()) {
-            true
-        } else {
-            details.genres.any { it.id in selectedGenreIds }
-        }
-
-        return actorsMatch && directorsMatch && genresMatch
-    }
-
-    private fun loadLocalSuggestions(
-        role: PersonRole,
-        query: String
-    ): List<PersonSuggestion> {
-        return database.movieEntityQueries
-            .getPersonSuggestionsByJob(
-                job = role.localJob,
-                query = query
-            )
-            .executeAsList()
-            .map { name ->
-                PersonSuggestion(
-                    name = name,
-                    tmdbPersonId = null,
-                    source = SuggestionSource.LOCAL
-                )
-            }
     }
 
     private fun filterOutSelected(

@@ -3,29 +3,23 @@ package com.martonegyed.presentation.screens.details
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.martonegyed.core.AppLogger
-import com.martonegyed.data.database.CineGraphDatabase
-import com.martonegyed.data.remote.TmdbApiService
 import com.martonegyed.domain.model.Movie
-import com.martonegyed.domain.model.Person
-import com.martonegyed.domain.model.SimilarMovie
+import com.martonegyed.domain.model.MovieLog
+import com.martonegyed.domain.model.ManualMovieLog
+import com.martonegyed.domain.model.MovieLogEntryMode
+import com.martonegyed.domain.repository.MovieDetailsRepository
+import com.martonegyed.domain.repository.MovieLogRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
-
-data class MovieLog(
-    val id: Long,
-    val watchedDate: String?,
-    val rating: Double?,
-    val review: String?,
-    val isRewatch: Boolean
-)
 
 class MovieDetailScreenModel(
-    private val database: CineGraphDatabase,
-    private val tmdbService: TmdbApiService
+    private val repository: MovieDetailsRepository,
+    private val logRepository: MovieLogRepository
 ) : ScreenModel {
-
     private val _movie = MutableStateFlow<Movie?>(null)
     val movie = _movie.asStateFlow()
 
@@ -38,203 +32,114 @@ class MovieDetailScreenModel(
     private val _isEnriching = MutableStateFlow(false)
     val isEnriching = _isEnriching.asStateFlow()
 
-    private val json = Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
+    private val _logEntryMode = MutableStateFlow<MovieLogEntryMode?>(null)
+    val logEntryMode = _logEntryMode.asStateFlow()
+    private val _isSavingLog = MutableStateFlow(false)
+    val isSavingLog = _isSavingLog.asStateFlow()
+    private val _logError = MutableStateFlow<String?>(null)
+    val logError = _logError.asStateFlow()
+    private val _logMessage = MutableStateFlow<String?>(null)
+    val logMessage = _logMessage.asStateFlow()
+    private val _editingLog = MutableStateFlow<MovieLog?>(null)
+    val editingLog = _editingLog.asStateFlow()
+    private val _logToDelete = MutableStateFlow<MovieLog?>(null)
+    val logToDelete = _logToDelete.asStateFlow()
+    private val _actionError = MutableStateFlow<String?>(null)
+    val actionError = _actionError.asStateFlow()
+    private val _wasRemoved = MutableStateFlow(false)
+    val wasRemoved = _wasRemoved.asStateFlow()
+    private var enrichmentJob: Job? = null
+
+    fun openLogEntry(mode: MovieLogEntryMode) {
+        if (_isSavingLog.value) return
+        _logError.value = null
+        _editingLog.value = null
+        _logEntryMode.value = mode
     }
 
-    fun init(initialMovie: Movie) {
-        screenModelScope.launch {
-            val fullMovie = loadFullMovie(initialMovie.id.toLong()) ?: initialMovie
-            _movie.value = fullMovie
-            loadLogs(initialMovie.id.toLong())
-            enrichIfNeeded(fullMovie)
-        }
+    fun editLog(log: MovieLog) {
+        if (_isSavingLog.value) return
+        val existing = _logs.value.singleOrNull { it.id == log.id } ?: return
+        _logError.value = null
+        _editingLog.value = existing
+        _logEntryMode.value = MovieLogEntryMode.EDIT
     }
 
-    private fun loadLogs(movieId: Long) {
+    fun dismissLogEntry() {
+        if (_isSavingLog.value) return
+        _logEntryMode.value = null
+        _editingLog.value = null
+        _logError.value = null
+    }
+
+    fun dismissLogMessage() {
+        _logMessage.value = null
+    }
+
+    fun saveLog(watchedDate: String?, rating: Double?, review: String?, ratedDate: String?) {
+        val movie = _movie.value?.takeIf { it.id > 0 } ?: return
+        val mode = _logEntryMode.value ?: return
+        val editing = _editingLog.value
+        if (_isSavingLog.value) return
+        _isSavingLog.value = true
+        _logError.value = null
         screenModelScope.launch {
-            val rawLogs = database.movieEntityQueries
-                .getLogsForMovie(movieId)
-                .executeAsList()
-            _logs.value = rawLogs.map {
-                MovieLog(
-                    id = it.id,
-                    watchedDate = it.watchedDate,
-                    rating = it.rating,
-                    review = it.review,
-                    isRewatch = it.isRewatch == 1L
-                )
+            try {
+                when (mode) {
+                    MovieLogEntryMode.VIEWING -> logRepository.addViewing(movie.id.toLong(), ManualMovieLog(watchedDate, rating, review))
+                    MovieLogEntryMode.RATING -> logRepository.rateMovie(movie.id.toLong(), requireNotNull(rating) { "Choose a rating." })
+                    MovieLogEntryMode.EDIT -> logRepository.updateLog(movie.id.toLong(), requireNotNull(editing).id,
+                        ManualMovieLog(watchedDate, rating, review, ratedDate))
+                }
+                reloadMovie(movie.id.toLong())
+                _logEntryMode.value = null
+                _editingLog.value = null
+                _logMessage.value = when (mode) {
+                    MovieLogEntryMode.VIEWING -> "Viewing saved"
+                    MovieLogEntryMode.RATING -> "Rating saved"
+                    MovieLogEntryMode.EDIT -> "Log updated"
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _logError.value = e.message ?: "Could not save your log. Try again."
+            } finally {
+                _isSavingLog.value = false
             }
         }
     }
 
-    private fun enrichIfNeeded(movie: Movie) {
-        if (!needsTmdbEnrichment(movie)) return
-        enrichMovie(movie)
+    private suspend fun reloadMovie(movieId: Long) {
+        _movie.value = repository.getMovie(movieId) ?: _movie.value
+        _logs.value = repository.getLogs(movieId)
     }
 
-    private fun needsTmdbEnrichment(movie: Movie): Boolean {
-        val tmdbId = movie.tmdbId ?: return false
-        if (tmdbId <= 0) return false
-
-        val missingCore = movie.runtimeMinutes == null ||
-                movie.genres.isNullOrEmpty() ||
-                movie.actors.isNullOrEmpty() ||
-                movie.crew.isNullOrEmpty()
-
-        val missingExtended = movie.trailerKey.isNullOrBlank() ||
-                movie.studios.isNullOrEmpty() ||
-                movie.productionCountries.isNullOrEmpty() ||
-                movie.spokenLanguages.isNullOrEmpty() ||
-                movie.similarMovies.isNullOrEmpty() ||
-                movie.tmdbReviews.isNullOrEmpty()
-
-        val missingIdentity = movie.originalTitle.isNullOrBlank() ||
-                movie.tagline.isNullOrBlank()
-
-        return missingCore || missingExtended || missingIdentity
+    fun init(initialMovie: Movie) {
+        screenModelScope.launch {
+            val fullMovie = repository.resolveMovie(initialMovie) ?: initialMovie
+            _movie.value = fullMovie
+            _logs.value = repository.getLogs(fullMovie.id.toLong())
+            if (repository.needsEnrichment(fullMovie)) enrichMovie(fullMovie)
+        }
     }
 
     fun refreshDetails() {
-        _movie.value?.let { movie ->
-            enrichMovie(movie)
-        }
+        if (_isSavingLog.value || _wasRemoved.value || _isEnriching.value) return
+        _movie.value?.let(::enrichMovie)
     }
 
     private fun enrichMovie(movie: Movie) {
         val tmdbId = movie.tmdbId ?: return
         if (tmdbId <= 0) return
 
-        screenModelScope.launch {
+        enrichmentJob?.cancel()
+        enrichmentJob = screenModelScope.launch {
             _isEnriching.value = true
             try {
-                val details = tmdbService.getMovieDetails(tmdbId) ?: return@launch
-
-                val enrichedSimilarMovies =
-                    details.similar?.results
-                        ?.take(10)
-                        ?.map { t ->
-                            SimilarMovie(
-                                tmdbId = t.id,
-                                name = t.title,
-                                year = t.releaseDate?.take(4)?.toIntOrNull(),
-                                posterPath = t.posterPath,
-                                originalTitle = t.title,
-                                originalLanguage = t.originalLanguage,
-                                backdropPath = t.backdropPath,
-                                overview = t.overview,
-                                tmdbVoteAverage = t.voteAverage,
-                                tmdbVoteCount = t.voteCount
-                            )
-                        }
-                        ?.takeIf { it.isNotEmpty() }
-
-                val enrichedReviews =
-                    details.reviews?.results
-                        ?.take(5)
-                        ?.map { "${it.author}: ${it.content}" }
-                        ?.takeIf { it.isNotEmpty() }
-
-                val enriched = movie.copy(
-                    runtimeMinutes = details.runtime ?: movie.runtimeMinutes,
-                    tagline = details.tagline ?: movie.tagline,
-                    originalTitle = details.originalTitle ?: movie.originalTitle,
-                    originalLanguage = details.originalLanguage ?: movie.originalLanguage,
-                    overview = details.overview ?: movie.overview,
-                    revenue = details.revenue ?: movie.revenue,
-                    budget = details.budget?.toInt() ?: movie.budget,
-                    imdbId = details.imdbId ?: movie.imdbId,
-                    collectionName = details.collection?.name ?: movie.collectionName,
-                    trailerKey = details.trailerKey ?: movie.trailerKey,
-                    mpaaRating = details.mpaaRating ?: movie.mpaaRating,
-                    hungarianTitle = details.hungarianTitle ?: movie.hungarianTitle,
-                    tmdbVoteAverage = details.voteAverage ?: movie.tmdbVoteAverage,
-                    tmdbVoteCount = details.voteCount ?: movie.tmdbVoteCount,
-                    tmdbPopularity = details.popularity ?: movie.tmdbPopularity,
-                    genres = details.genres.map { it.name }.takeIf { it.isNotEmpty() } ?: movie.genres,
-                    studios = details.studios.map { it.name }.takeIf { it.isNotEmpty() } ?: movie.studios,
-                    productionCountries = details.productionCountries.map { it.name }
-                        .takeIf { it.isNotEmpty() } ?: movie.productionCountries,
-                    spokenLanguages = details.spokenLanguages.map { it.englishName }
-                        .takeIf { it.isNotEmpty() } ?: movie.spokenLanguages,
-                    actors = details.credits?.cast
-                        ?.map {
-                            Person(
-                                name = it.name,
-                                character = it.character,
-                                profilePath = it.profilePath,
-                                job = "Actor"
-                            )
-                        }
-                        ?.takeIf { it.isNotEmpty() }
-                        ?: movie.actors,
-                    crew = details.credits?.crew
-                        ?.map {
-                            Person(
-                                name = it.name,
-                                job = it.job,
-                                profilePath = it.profilePath
-                            )
-                        }
-                        ?.takeIf { it.isNotEmpty() }
-                        ?: movie.crew,
-                    similarMovies = enrichedSimilarMovies ?: movie.similarMovies,
-                    tmdbReviews = enrichedReviews ?: movie.tmdbReviews,
-                    posterPath = details.posterPath ?: movie.posterPath,
-                    backdropPath = details.backdropPath ?: movie.backdropPath,
-                )
-
-                _movie.value = enriched
-
-                database.movieEntityQueries.updateMovieWithTmdb(
-                    posterPath = enriched.posterPath,
-                    backdropPath = enriched.backdropPath,
-                    overview = enriched.overview,
-                    runtimeMinutes = enriched.runtimeMinutes?.toLong(),
-                    tmdbId = enriched.tmdbId?.toString(),
-                    tagline = enriched.tagline,
-                    originalTitle = enriched.originalTitle,
-                    originalLanguage = enriched.originalLanguage,
-                    budget = enriched.budget?.toLong(),
-                    revenue = enriched.revenue,
-                    genres = enriched.genres?.let(json::encodeToString),
-                    hungarianTitle = enriched.hungarianTitle,
-                    tmdbPopularity = enriched.tmdbPopularity,
-                    tmdbVoteAverage = enriched.tmdbVoteAverage,
-                    tmdbVoteCount = enriched.tmdbVoteCount?.toLong(),
-                    collectionName = enriched.collectionName,
-                    trailerKey = enriched.trailerKey,
-                    mpaaRating = enriched.mpaaRating,
-                    studios = enriched.studios?.let(json::encodeToString),
-                    productionCountries = enriched.productionCountries?.let(json::encodeToString),
-                    spokenLanguages = enriched.spokenLanguages?.let(json::encodeToString),
-                    similarMovies = enriched.similarMovies?.let(json::encodeToString),
-                    tmdbReviews = enriched.tmdbReviews?.let(json::encodeToString),
-                    id = enriched.id.toLong()
-                )
-
-                database.movieEntityQueries.deletePersonsForMovie(enriched.id.toLong())
-
-                enriched.actors.orEmpty().forEach { person ->
-                    database.movieEntityQueries.insertMoviePerson(
-                        movieId = enriched.id.toLong(),
-                        name = person.name.orEmpty(),
-                        job = person.job ?: "Actor",
-                        character = person.character,
-                        profilePath = person.profilePath
-                    )
-                }
-
-                enriched.crew.orEmpty().forEach { person ->
-                    database.movieEntityQueries.insertMoviePerson(
-                        movieId = enriched.id.toLong(),
-                        name = person.name.orEmpty(),
-                        job = person.job ?: "",
-                        character = person.character,
-                        profilePath = person.profilePath
-                    )
-                }
+                val refreshed = repository.refreshMovie(movie)
+                reloadMovie(refreshed.id.toLong())
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 AppLogger.exception(
                     tag = "MovieDetailScreenModel",
@@ -248,95 +153,66 @@ class MovieDetailScreenModel(
     }
 
     fun requestDelete() {
+        if (_isSavingLog.value) return
+        _actionError.value = null
         _showDeleteDialog.value = true
     }
 
     fun dismissDeleteDialog() {
+        if (_isSavingLog.value) return
         _showDeleteDialog.value = false
+        _actionError.value = null
     }
 
-    private suspend fun loadFullMovie(movieId: Long): Movie? {
-        val row = database.movieEntityQueries
-            .getMovieById(movieId)
-            .executeAsOneOrNull()
-            ?: return null
+    fun requestDeleteLog(log: MovieLog) {
+        if (_isSavingLog.value) return
+        _actionError.value = null
+        _logToDelete.value = _logs.value.singleOrNull { it.id == log.id }
+    }
 
-        val persons = database.movieEntityQueries
-            .getPersonsForMovie(movieId)
-            .executeAsList()
+    fun dismissLogDeletion() {
+        if (_isSavingLog.value) return
+        _logToDelete.value = null
+        _actionError.value = null
+    }
 
-        val actors = persons
-            .filter { it.job == "Actor" }
-            .map {
-                Person(
-                    name = it.name,
-                    job = it.job,
-                    character = it.character,
-                    profilePath = it.profilePath
-                )
+    fun confirmDeleteLog() {
+        val log = _logToDelete.value ?: return
+        mutateHistory(action = { logRepository.deleteLog(it, log.id) }, afterSuccess = {
+            reloadMovie(it)
+            _logToDelete.value = null
+            _logMessage.value = "Log deleted"
+        })
+    }
+
+    fun confirmRemoveMovie() {
+        if (!_showDeleteDialog.value) return
+        mutateHistory(action = {
+            enrichmentJob?.cancelAndJoin()
+            logRepository.removeMovie(it)
+        }, afterSuccess = {
+            _logs.value = emptyList()
+            _showDeleteDialog.value = false
+            _wasRemoved.value = true
+        })
+    }
+
+    private fun mutateHistory(action: suspend (Long) -> Unit, afterSuccess: suspend (Long) -> Unit) {
+        val movieId = _movie.value?.id?.takeIf { it > 0 }?.toLong() ?: return
+        if (_isSavingLog.value) return
+        _isSavingLog.value = true
+        _actionError.value = null
+        screenModelScope.launch {
+            try {
+                action(movieId)
+                afterSuccess(movieId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _actionError.value = e.message ?: "Could not remove this item. Try again."
+            } finally {
+                _isSavingLog.value = false
             }
-
-        val crew = persons
-            .filter { it.job != "Actor" }
-            .map {
-                Person(
-                    name = it.name,
-                    job = it.job,
-                    character = it.character,
-                    profilePath = it.profilePath
-                )
-            }
-
-        return Movie(
-            id = row.id.toInt(),
-            tmdbId = row.tmdbId?.toIntOrNull(),
-            name = row.name,
-            year = row.year.toInt(),
-            rating = row.rating,
-            watchedDate = row.watchedDate,
-            addedDate = row.addedDate,
-            inWatchlist = row.inWatchlist == 1L,
-            isRewatch = row.isRewatch == 1L,
-            posterPath = row.posterPath,
-            backdropPath = row.backdropPath,
-            overview = row.overview,
-            tagline = row.tagline,
-            runtimeMinutes = row.runtimeMinutes?.toInt(),
-            originalTitle = row.originalTitle,
-            originalLanguage = row.originalLanguage,
-            hungarianTitle = row.hungarianTitle,
-            budget = row.budget?.toInt(),
-            revenue = row.revenue,
-            tmdbPopularity = row.tmdbPopularity,
-            tmdbVoteAverage = row.tmdbVoteAverage,
-            tmdbVoteCount = row.tmdbVoteCount?.toInt(),
-            collectionName = row.collectionName,
-            trailerKey = row.trailerKey,
-            mpaaRating = row.mpaaRating,
-            imdbId = row.imdbId,
-            genres = decodeJsonStringList(row.genres),
-            actors = actors.ifEmpty { null },
-            crew = crew.ifEmpty { null },
-            studios = decodeJsonStringList(row.studios),
-            productionCountries = decodeJsonStringList(row.productionCountries),
-            spokenLanguages = decodeJsonStringList(row.spokenLanguages),
-            similarMovies = decodeSimilarMovies(row.similarMovies),
-            tmdbReviews = decodeJsonStringList(row.tmdbReviews),
-            letterboxdUri = row.letterboxdUri
-        )
-    }
-
-    private fun decodeJsonStringList(value: String?): List<String>? {
-        val raw = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        return runCatching { json.decodeFromString<List<String>>(raw) }
-            .onFailure { println("Failed to decode string list JSON: ${it.message}") }
-            .getOrNull()
-    }
-
-    private fun decodeSimilarMovies(value: String?): List<SimilarMovie>? {
-        val raw = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        return runCatching { json.decodeFromString<List<SimilarMovie>>(raw) }
-            .onFailure { println("Failed to decode similar movies JSON: ${it.message}") }
-            .getOrNull()
+        }
     }
 }

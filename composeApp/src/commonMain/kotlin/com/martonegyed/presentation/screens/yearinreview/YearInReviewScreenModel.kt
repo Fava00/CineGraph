@@ -3,19 +3,25 @@ package com.martonegyed.presentation.screens.yearinreview
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.martonegyed.core.ui.languageDisplayName
+import com.martonegyed.presentation.analytics.AnalyticsFilters
 import com.martonegyed.domain.model.Movie
 import com.martonegyed.presentation.analytics.AnalyticsEntityAggregator
-import com.martonegyed.presentation.analytics.AnalyticsRepository
+import com.martonegyed.domain.repository.AnalyticsRepository
 import com.martonegyed.presentation.analytics.AnalyticsSharedModels
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import kotlin.collections.emptyList
 
 class YearInReviewScreenModel(
-    private val analyticsRepository: AnalyticsRepository
+    private val analyticsRepository: AnalyticsRepository,
+    private val calculationDispatcher: CoroutineDispatcher = Dispatchers.Default
 ) : ScreenModel {
 
     private val _state = MutableStateFlow(YearInReviewState())
@@ -36,26 +42,29 @@ class YearInReviewScreenModel(
         )
     }
 
-    private fun load(forceRefresh: Boolean = false) {
+    private fun load() {
         screenModelScope.launch {
             _state.value = _state.value.copy(isLoading = true)
 
-            val snapshot = analyticsRepository.getSnapshot(forceRefresh)
-            allWatchedMovies = snapshot.movies
+            analyticsRepository.observeSnapshots().collectLatest { snapshot ->
+                allWatchedMovies = snapshot.viewings
 
-            val resolvedYear = analyticsRepository.normalizeYear(
-                selectedYear = _state.value.selectedYear,
-                availableYears = snapshot.availableYears
-            )
-
-            _state.value = compute(
-                movies = allWatchedMovies,
-                state = YearInReviewState(
-                    isLoading = false,
-                    selectedYear = resolvedYear,
-                    availableYears = snapshot.availableYears
-                )
-            )
+                var input: YearInReviewState
+                var result: YearInReviewState
+                do {
+                input = _state.value
+                val resolvedYear = AnalyticsFilters.normalizeYear(input.selectedYear, snapshot.availableYears)
+                result = withContext(calculationDispatcher) { compute(
+                    movies = allWatchedMovies,
+                    state = YearInReviewState(
+                        isLoading = false,
+                        selectedYear = resolvedYear,
+                        availableYears = snapshot.availableYears
+                    )
+                ) }
+                } while (_state.value !== input)
+                _state.value = result
+            }
         }
     }
 
@@ -65,17 +74,18 @@ class YearInReviewScreenModel(
     ): YearInReviewState {
         val year = state.selectedYear ?: return emptyYearState(state)
 
-        val filtered = analyticsRepository.filterMoviesByYear(movies, year)
+        val filtered = AnalyticsFilters.filterMoviesByYear(movies, year)
         if (filtered.isEmpty()) {
             return emptyYearState(state)
         }
 
         val totalMinutes = filtered.sumOf { it.runtimeMinutes ?: 0 }
-        val ratings = filtered.mapNotNull { it.rating }
+        val uniqueMovies = filtered.distinctBy { it.id }
+        val ratings = uniqueMovies.mapNotNull { it.rating }
         val averageRating = ratings.takeIf { it.isNotEmpty() }?.average()
 
 
-        val highestRatedByUser = filtered
+        val highestRatedByUser = uniqueMovies
             .filter { (it.rating ?: 0.0) > 0.0 }
             .sortedWith(
                 compareByDescending<Movie> { it.rating ?: 0.0 }
@@ -83,12 +93,12 @@ class YearInReviewScreenModel(
             )
             .take(10)
 
-        val highestRatedByTmdb = filtered
+        val highestRatedByTmdb = uniqueMovies
             .filter { (it.tmdbVoteAverage ?: 0.0) > 0.0 }
             .sortedByDescending { it.tmdbVoteAverage ?: 0.0 }
             .take(10)
 
-        val lowestRatedByTmdb = filtered
+        val lowestRatedByTmdb = uniqueMovies
             .filter { (it.tmdbVoteAverage ?: 0.0) > 0.0 }
             .sortedBy { it.tmdbVoteAverage ?: Double.MAX_VALUE }
             .take(10)
@@ -185,16 +195,17 @@ class YearInReviewScreenModel(
             nameOf = { it }
         )
 
-        val releasedThisYear = filtered.count { it.year == year }
-        val olderTitles = filtered.count { it.year in 1 until year }
+        val releasedThisYear = uniqueMovies.count { it.year == year }
+        val olderTitles = uniqueMovies.count { it.year in 1 until year }
 
         return state.copy(
             isLoading = false,
             hero = YearHeroSummary(
-                filmCount = filtered.size,
+                filmCount = uniqueMovies.size,
+                viewingCount = filtered.size,
                 hoursWatched = totalMinutes / 60,
                 averageRating = averageRating,
-                totalRevenue = filtered.sumOf { it.revenue ?: 0L }
+                totalRevenue = uniqueMovies.sumOf { it.revenue ?: 0L }
             ),
             mostWatchedDirector = AnalyticsEntityAggregator.sort(
                 directorRows,
@@ -269,7 +280,7 @@ class YearInReviewScreenModel(
                 .sort(countryRows, AnalyticsSharedModels.AnalyticsEntityMetric.AVG_RATING)
                 .take(20)
                 .map { RankRow(label = it.name, count = it.count, averageRating = it.avgRating) },
-            mapCountries = analyticsRepository.computeMapCountries(filtered)
+            mapCountries = AnalyticsFilters.computeMapCountries(filtered)
         )
     }
 

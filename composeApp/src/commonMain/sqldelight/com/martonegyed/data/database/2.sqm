@@ -1,0 +1,21 @@
+-- Separate viewing, rating, and local creation dates. Never backfill creation with migration time.
+ALTER TABLE MovieLogEntity ADD COLUMN ratedDate TEXT;
+ALTER TABLE MovieLogEntity ADD COLUMN createdAt TEXT;
+UPDATE MovieLogEntity SET ratedDate = NULLIF(loggedDate, '') WHERE upper(sourceType) = 'RATINGS' AND rating IS NOT NULL;
+-- The old IMDb ratings importer copied Date Rated into both fields.
+UPDATE MovieLogEntity SET watchedDate = NULL WHERE upper(sourceType) = 'RATINGS' AND watchedDate = loggedDate;
+UPDATE MovieLogEntity SET watchedDate = NULL WHERE trim(watchedDate) = '';
+UPDATE MovieLogEntity SET rating = NULL WHERE rating = 0;
+
+CREATE VIEW CurrentMovieRating AS
+SELECT log.movieId, log.rating, COALESCE(log.watchedDate, log.ratedDate) AS effectiveDate, log.stableId
+FROM MovieLogEntity log
+WHERE log.id = (
+    SELECT candidate.id FROM MovieLogEntity candidate
+    WHERE candidate.movieId = log.movieId
+      AND candidate.rating BETWEEN 0.5 AND 5.0
+      AND candidate.rating * 2 = CAST(candidate.rating * 2 AS INTEGER)
+    ORDER BY COALESCE(candidate.watchedDate, candidate.ratedDate) DESC, candidate.stableId DESC
+    LIMIT 1
+);
+

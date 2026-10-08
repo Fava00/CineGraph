@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -27,6 +28,25 @@ fun LoadingView(state: SyncState.Loading) {
         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
         Spacer(modifier = Modifier.height(16.dp))
         Text(state.message, color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center)
+        state.backupProgress?.let { progress ->
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "${progress.completed} / ${progress.total} records restored · ${progress.remaining} left",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                "${progress.movieCount} movies in backup; credits, logs and lists are included in the record count",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = { if (progress.total == 0) 1f else progress.completed.toFloat() / progress.total },
+                modifier = Modifier.fillMaxWidth(0.7f)
+            )
+        }
     }
 }
 

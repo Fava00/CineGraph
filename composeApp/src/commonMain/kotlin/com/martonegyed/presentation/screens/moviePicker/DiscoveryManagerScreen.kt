@@ -1,5 +1,6 @@
 package com.martonegyed.presentation.screens.moviePicker
 
+import com.martonegyed.domain.model.DiscoveryMovie
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -150,23 +151,14 @@ enum class DiscoveryManagerTab {
     IGNORED
 }
 
-data class DiscoveryManagerMovieUi(
-    val localMovieId: Long? = null,
-    val tmdbId: Int? = null,
-    val title: String,
-    val year: Int? = null,
-    val posterPath: String? = null,
-    val tmdbVoteAverage: Double? = null
-)
-
 data class DiscoveryManagerUiState(
     val isLoading: Boolean = true,
     val selectedTab: DiscoveryManagerTab = DiscoveryManagerTab.CACHED,
-    val cachedMovies: List<DiscoveryManagerMovieUi> = emptyList(),
-    val ignoredMovies: List<DiscoveryManagerMovieUi> = emptyList()
+    val cachedMovies: List<DiscoveryMovie> = emptyList(),
+    val ignoredMovies: List<DiscoveryMovie> = emptyList()
 )
 
-fun DiscoveryManagerMovieUi.toMovie(): Movie {
+fun DiscoveryMovie.toMovie(): Movie {
     return Movie(
         id = (localMovieId ?: 0L).toInt(),
         tmdbId = tmdbId,
@@ -180,11 +172,11 @@ fun DiscoveryManagerMovieUi.toMovie(): Movie {
 
 @Composable
 private fun DiscoveryMovieList(
-    movies: List<DiscoveryManagerMovieUi>,
+    movies: List<DiscoveryMovie>,
     emptyText: String,
     emptySubtext: String,
-    trailingContent: @Composable (DiscoveryManagerMovieUi) -> Unit,
-    onMovieClick: (DiscoveryManagerMovieUi) -> Unit
+    trailingContent: @Composable (DiscoveryMovie) -> Unit,
+    onMovieClick: (DiscoveryMovie) -> Unit
 ) {
     if (movies.isEmpty()) {
         Box(

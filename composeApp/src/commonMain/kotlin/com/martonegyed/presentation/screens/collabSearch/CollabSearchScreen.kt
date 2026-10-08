@@ -1,5 +1,8 @@
 package com.martonegyed.presentation.screens.collabSearch
 
+import com.martonegyed.domain.model.PersonRole
+import com.martonegyed.domain.model.MovieGenre
+import com.martonegyed.domain.model.CrossoverMovie
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -32,12 +35,10 @@ import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
-import com.martonegyed.data.remote.TmdbMovie
 import com.martonegyed.domain.model.PersonSuggestion
 import com.martonegyed.domain.model.SelectedPerson
 import com.martonegyed.domain.model.SuggestionSource
 import com.martonegyed.core.ui.adaptive.AdaptiveLayout
-import com.martonegyed.data.remote.TmdbGenre
 import com.martonegyed.presentation.components.common.AppDrawer
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -345,7 +346,7 @@ private fun ReleaseYearSection(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GenreSection(
-    genres: List<TmdbGenre>,
+    genres: List<MovieGenre>,
     selectedGenreIds: Set<Int>,
     onToggle: (Int) -> Unit
 ) {
@@ -365,7 +366,7 @@ private fun GenreSection(
 
 @Composable
 private fun DiscoveryResultsGrid(
-    movies: List<TmdbMovie>,
+    movies: List<CrossoverMovie>,
     compact: Boolean
 ) {
     val columns = if (compact) 3 else 4
@@ -388,7 +389,7 @@ private fun DiscoveryResultsGrid(
 
 @Composable
 private fun DiscoveryMovieCard(
-    movie: TmdbMovie
+    movie: CrossoverMovie
 ) {
     val colors = MaterialTheme.colorScheme
 

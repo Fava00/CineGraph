@@ -1,5 +1,8 @@
 package com.martonegyed.presentation.screens.moviePicker
 
+import com.martonegyed.domain.model.MoviePickerSearchSource
+import com.martonegyed.domain.model.MoviePickerWatchIntent
+import com.martonegyed.domain.model.MovieGenre
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -65,7 +68,6 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.martonegyed.core.ui.adaptive.AdaptiveLayout
 import com.martonegyed.core.util.roundToDecimals
-import com.martonegyed.data.remote.TmdbGenre
 import com.martonegyed.presentation.components.common.AppDrawer
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -378,7 +380,7 @@ private fun SearchDepthSection(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GenreChooser(
-    genres: List<TmdbGenre>,
+    genres: List<MovieGenre>,
     states: Map<Int, TriStateFilter>,
     onGenreTap: (Int) -> Unit
 ) {
@@ -485,7 +487,7 @@ private fun TriStateChip(
     }
     val content = when (state) {
         TriStateFilter.NEUTRAL -> colors.onSurfaceVariant
-        TriStateFilter.INCLUDE -> colors.onPrimaryContainer
+        TriStateFilter.INCLUDE -> Color.Black
         TriStateFilter.EXCLUDE -> colors.onErrorContainer
     }
     val displayLabel = when (state) {

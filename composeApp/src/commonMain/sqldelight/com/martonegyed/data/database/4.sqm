@@ -1,0 +1,9 @@
+CREATE TABLE TmdbSuggestionCache (
+    movieId INTEGER NOT NULL PRIMARY KEY REFERENCES MovieEntity(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    candidatesJson TEXT NOT NULL,
+    searchJson TEXT,
+    updatedAt INTEGER NOT NULL
+);

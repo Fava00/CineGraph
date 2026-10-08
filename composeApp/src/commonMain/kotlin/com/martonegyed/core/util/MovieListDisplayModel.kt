@@ -1,8 +1,8 @@
 package com.martonegyed.core.util
 
 import com.martonegyed.domain.model.Movie
-import com.martonegyed.presentation.screens.movies.MovieCollectionRow
-import com.martonegyed.presentation.screens.movies.MovieListType
+import com.martonegyed.domain.model.MovieCollectionRow
+import com.martonegyed.domain.model.MovieListType
 
 data class MovieListDisplayModel(
     val id: Int,

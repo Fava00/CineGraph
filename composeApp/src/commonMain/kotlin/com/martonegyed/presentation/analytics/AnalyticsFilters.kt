@@ -75,4 +75,43 @@ object AnalyticsFilters {
 
         return Triple(normalizedRange, normalizedYear, normalizedMonth)
     }
+
+    fun normalizeYear(selectedYear: Int?, availableYears: List<Int>): Int? {
+        return when {
+            selectedYear != null && selectedYear in availableYears -> selectedYear
+            availableYears.isNotEmpty() -> availableYears.first()
+            else -> null
+        }
+    }
+
+    fun filterMoviesByYear(movies: List<Movie>, year: Int?): List<Movie> {
+        if (year == null) return emptyList()
+
+        return movies.filter { movie ->
+            movie.watchedDate?.take(4)?.toIntOrNull() == year
+        }
+    }
+
+    fun computeMapCountries(movies: List<Movie>): List<AnalyticsSharedModels.MapCountryRow> {
+        return movies
+            .distinctBy { it.id }
+            .flatMap { movie ->
+                movie.productionCountries
+                    .orEmpty()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .distinct()
+            }
+            .groupingBy { it }
+            .eachCount()
+            .entries
+            .sortedByDescending { it.value }
+            .map { (name, count) ->
+                AnalyticsSharedModels.MapCountryRow(
+                    name = name,
+                    count = count
+                )
+            }
+    }
+
 }

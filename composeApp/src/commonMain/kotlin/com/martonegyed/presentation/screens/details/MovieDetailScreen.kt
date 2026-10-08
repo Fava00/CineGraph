@@ -9,8 +9,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.screen.Screen
+import cafe.adriel.voyager.core.screen.uniqueScreenKey
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.Navigator
@@ -43,6 +42,12 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
 import com.martonegyed.core.util.revenueFormater
 import com.martonegyed.domain.model.Movie
+import com.martonegyed.domain.model.MovieLog
+import com.martonegyed.domain.model.MovieLogEntryMode
+import com.martonegyed.presentation.components.details.MovieLogEntryDialog
+import com.martonegyed.presentation.components.details.MovieReviewsSection
+import com.martonegyed.presentation.components.details.MovieLogsSection
+import com.martonegyed.presentation.components.details.MovieHistoryDeleteDialog
 import com.martonegyed.domain.model.Person
 import kotlin.math.round
 import com.martonegyed.domain.model.SimilarMovie
@@ -57,7 +62,8 @@ import com.martonegyed.presentation.components.common.HorizontalRow
 import com.martonegyed.presentation.components.details.MetaTag
 import com.martonegyed.presentation.components.details.SectionTitle
 
-data class MovieDetailScreen(val movie: Movie) : Screen {
+class MovieDetailScreen(val movie: Movie) : Screen {
+    override val key: String = uniqueScreenKey
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
@@ -68,13 +74,31 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         val movieState by screenModel.movie.collectAsState()
         val logs by screenModel.logs.collectAsState()
         val isEnriching by screenModel.isEnriching.collectAsState()
+        val logEntryMode by screenModel.logEntryMode.collectAsState()
+        val isSavingLog by screenModel.isSavingLog.collectAsState()
+        val editingLog by screenModel.editingLog.collectAsState()
+        val logToDelete by screenModel.logToDelete.collectAsState()
+        val showDeleteDialog by screenModel.showDeleteDialog.collectAsState()
+        val actionError by screenModel.actionError.collectAsState()
+        val wasRemoved by screenModel.wasRemoved.collectAsState()
+        val logError by screenModel.logError.collectAsState()
+        val logMessage by screenModel.logMessage.collectAsState()
+        val snackbarHostState = remember { SnackbarHostState() }
+        LaunchedEffect(wasRemoved) { if (wasRemoved) navigator.pop() }
+
+        LaunchedEffect(logMessage) {
+            logMessage?.let {
+                snackbarHostState.showSnackbar(it)
+                screenModel.dismissLogMessage()
+            }
+        }
         val uriHandler = LocalUriHandler.current
         val layoutDirection = LocalLayoutDirection.current
 
         var showMoreMenu by remember { mutableStateOf(false) }
         var showFullCrewSheet by remember { mutableStateOf(false) }
 
-        LaunchedEffect(movie.id) {
+        LaunchedEffect(key) {
             screenModel.init(movie)
         }
 
@@ -82,7 +106,46 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
         val isCollapsed = scrollBehavior.state.collapsedFraction > 0.8f
 
+        logEntryMode?.let { mode ->
+            key(mode, editingLog?.id) {
+                MovieLogEntryDialog(
+                    title = m.name,
+                    mode = mode,
+                    logs = logs,
+                    isSaving = isSavingLog,
+                    error = logError,
+                    onDismiss = screenModel::dismissLogEntry,
+                    onSave = screenModel::saveLog,
+                    editingLog = editingLog
+                )
+            }
+        }
+
+        logToDelete?.let { log ->
+            MovieHistoryDeleteDialog(
+                title = "Delete log?",
+                description = "Delete the log for " + m.name + " (" + (log.watchedDate ?: "date unknown") + ")? Its rating and review will also be removed.",
+                confirmLabel = "Delete log",
+                isDeleting = isSavingLog,
+                error = actionError,
+                onConfirm = screenModel::confirmDeleteLog,
+                onDismiss = screenModel::dismissLogDeletion
+            )
+        }
+        if (showDeleteDialog) {
+            MovieHistoryDeleteDialog(
+                title = "Remove movie?",
+                description = m.name + " will be removed from your library, watchlist and custom lists, together with " + logs.size + " log(s), ratings and reviews.",
+                confirmLabel = "Remove movie",
+                isDeleting = isSavingLog,
+                error = actionError,
+                onConfirm = screenModel::confirmRemoveMovie,
+                onDismiss = screenModel::dismissDeleteDialog
+            )
+        }
+
         Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             modifier = Modifier
                 .background(colors.background)
                 .nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -113,7 +176,42 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                         }
                     },
                     actions = {
-                        // keep your existing actions here
+                        TextButton(
+                            onClick = { screenModel.openLogEntry(MovieLogEntryMode.VIEWING) },
+                            enabled = movieState?.id?.let { it > 0 } == true && !isSavingLog
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Log viewing")
+                        }
+                        Box {
+                            IconButton(onClick = { showMoreMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "Movie actions")
+                            }
+                            DropdownMenu(expanded = showMoreMenu, onDismissRequest = { showMoreMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Rate movie") },
+                                    leadingIcon = { Icon(Icons.Default.Star, contentDescription = null) },
+                                    enabled = movieState?.id?.let { it > 0 } == true && !isSavingLog,
+                                    onClick = {
+                                        showMoreMenu = false
+                                        screenModel.openLogEntry(MovieLogEntryMode.RATING)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Refresh TMDb details") },
+                                    leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                                    enabled = !isEnriching && (m.tmdbId ?: 0) > 0,
+                                    onClick = { showMoreMenu = false; screenModel.refreshDetails() }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Remove movie", color = colors.error) },
+                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = colors.error) },
+                                    enabled = movieState?.id?.let { it > 0 } == true && !isSavingLog,
+                                    onClick = { showMoreMenu = false; screenModel.requestDelete() }
+                                )
+                            }
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent,
@@ -140,7 +238,10 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                     scaffoldTokens = adaptive.tokens.scaffold,
                     detailTokens = adaptive.tokens.movieDetail,
                     navigator = navigator,
-                    onShowFullCrew = { showFullCrewSheet = true }
+                    onShowFullCrew = { showFullCrewSheet = true },
+                    isHistoryBusy = isSavingLog,
+                    onEditLog = screenModel::editLog,
+                    onDeleteLog = screenModel::requestDeleteLog
                 )
 
                 if (showFullCrewSheet) {
@@ -172,7 +273,10 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         scaffoldTokens: AdaptiveScaffoldTokens,
         detailTokens: MovieDetailTokens,
         navigator: Navigator,
-        onShowFullCrew: () -> Unit
+        onShowFullCrew: () -> Unit,
+        isHistoryBusy: Boolean,
+        onEditLog: (MovieLog) -> Unit,
+        onDeleteLog: (MovieLog) -> Unit
     ) {
         val colors = MaterialTheme.colorScheme
         val compactModifier = Modifier
@@ -194,7 +298,10 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                     detailTokens = detailTokens,
                     modifier = Modifier.fillMaxSize(),
                     navigator = navigator,
-                    onShowFullCrew = onShowFullCrew
+                    onShowFullCrew = onShowFullCrew,
+                    isHistoryBusy = isHistoryBusy,
+                    onEditLog = onEditLog,
+                    onDeleteLog = onDeleteLog
                 )
             } else {
                 MovieDetailCompactContent(
@@ -205,7 +312,10 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                     detailTokens = detailTokens,
                     modifier = compactModifier,
                     navigator = navigator,
-                    onShowFullCrew = onShowFullCrew
+                    onShowFullCrew = onShowFullCrew,
+                    isHistoryBusy = isHistoryBusy,
+                    onEditLog = onEditLog,
+                    onDeleteLog = onDeleteLog
                 )
             }
         }
@@ -220,7 +330,10 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         detailTokens: MovieDetailTokens,
         modifier: Modifier = Modifier,
         navigator: Navigator,
-        onShowFullCrew: () -> Unit
+        onShowFullCrew: () -> Unit,
+        isHistoryBusy: Boolean,
+        onEditLog: (MovieLog) -> Unit,
+        onDeleteLog: (MovieLog) -> Unit
     ) {
         LazyColumn(
             modifier = modifier,
@@ -232,9 +345,7 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
             item { MovieHeroSection(movie, isEnriching, detailTokens, isTwoPane = false) }
             item { MovieOverviewSection(movie, detailTokens) }
 
-            if (!movie.userReview.isNullOrEmpty()) {
-                item { UserReviewSection(movie.userReview!!, detailTokens) }
-            }
+            item { MovieReviewsSection(logs, detailTokens, isHistoryBusy, onEditLog) }
 
             if (!movie.actors.isNullOrEmpty()) {
                 item { CastSection(movie.actors!!, detailTokens, navigator) }
@@ -266,7 +377,7 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                 item { SimilarMoviesSection(movie.similarMovies!!, detailTokens, navigator) }
             }
 
-            item { LogsSection(logs, detailTokens) }
+            item { MovieLogsSection(logs, detailTokens, isHistoryBusy, onEditLog, onDeleteLog) }
         }
     }
 
@@ -279,7 +390,10 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         detailTokens: MovieDetailTokens,
         modifier: Modifier = Modifier,
         navigator: Navigator,
-        onShowFullCrew: () -> Unit
+        onShowFullCrew: () -> Unit,
+        isHistoryBusy: Boolean,
+        onEditLog: (MovieLog) -> Unit,
+        onDeleteLog: (MovieLog) -> Unit
     ) {
         LazyColumn(
             modifier = modifier,
@@ -321,10 +435,8 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                                 isTwoPane = true
                             )
                             MovieOverviewSection(movie, detailTokens)
-                            if (!movie.userReview.isNullOrEmpty()) {
-                                UserReviewSection(movie.userReview!!, detailTokens)
-                            }
-                            LogsSection(logs, detailTokens)
+                            MovieReviewsSection(logs, detailTokens, isHistoryBusy, onEditLog)
+                            MovieLogsSection(logs, detailTokens, isHistoryBusy, onEditLog, onDeleteLog)
                         }
 
                         Column(
@@ -401,7 +513,6 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         }
     }
 
-    @OptIn(ExperimentalLayoutApi::class)
     @Composable
     fun MovieHeroSection(
         movie: Movie,
@@ -500,7 +611,6 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         }
     }
 
-    @OptIn(ExperimentalLayoutApi::class)
     @Composable
     private fun MovieOverviewSection(
         movie: Movie,
@@ -580,47 +690,6 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
                             )
                         }
                     }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-        }
-    }
-
-    @Composable
-    fun UserReviewSection(
-        review: String,
-        detailTokens: MovieDetailTokens
-    ) {
-        val colors = MaterialTheme.colorScheme
-
-        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(colors.background.copy(blue = 0.3f))
-                    .border(
-                        1.dp,
-                        colors.onBackground.copy(alpha = 0.1f),
-                        RoundedCornerShape(12.dp)
-                    )
-                    .padding(16.dp)
-            ) {
-                Column {
-                    Text(
-                        text = "YOUR REVIEW",
-                        color = colors.inversePrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = detailTokens.metaFontSize
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = review,
-                        color = colors.onBackground,
-                        fontSize = detailTokens.bodyFontSize,
-                        lineHeight = detailTokens.bodyFontSize * 1.4f
-                    )
                 }
             }
 
@@ -789,7 +858,6 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
         Spacer(Modifier.height(24.dp))
     }
 
-    @OptIn(ExperimentalLayoutApi::class)
     @Composable
     fun ProductionDetailsSection(
         movie: Movie,
@@ -867,75 +935,6 @@ data class MovieDetailScreen(val movie: Movie) : Screen {
 
         Spacer(Modifier.height(24.dp))
     }
-
-    @Composable
-    private fun LogsSection(
-        logs: List<MovieLog>,
-        detailTokens: MovieDetailTokens
-    ) {
-        val colors = MaterialTheme.colorScheme
-
-        Column {
-            HorizontalDivider(
-                color = colors.onBackground.copy(alpha = 0.1f),
-                modifier = Modifier.padding(16.dp)
-            )
-
-            SectionTitle("Your Logs", paddingHorizontal = 16.dp)
-            Spacer(Modifier.height(8.dp))
-
-            if (logs.isEmpty()) {
-                Text(
-                    text = "No logs yet.",
-                    color = colors.onSurfaceVariant,
-                    fontSize = detailTokens.metaFontSize,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-            } else {
-                logs.forEach { log ->
-                    ListItem(
-                        headlineContent = {
-                            Text(
-                                text = log.watchedDate ?: "Added to Watchlist",
-                                fontWeight = FontWeight.Bold,
-                                color = colors.onBackground,
-                                fontSize = detailTokens.bodyFontSize
-                            )
-                        },
-                        supportingContent = {
-                            if (log.rating != null) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        Icons.Default.Star,
-                                        contentDescription = null,
-                                        tint = colors.inversePrimary,
-                                        modifier = Modifier.size(12.dp)
-                                    )
-                                    Text(
-                                        text = " ${log.rating}",
-                                        color = colors.onBackground,
-                                        fontSize = detailTokens.metaFontSize
-                                    )
-                                }
-                            }
-                        },
-                        leadingContent = {
-                            Icon(
-                                imageVector = when {
-                                    log.isRewatch -> Icons.Default.Replay
-                                    log.watchedDate == null -> Icons.Default.Bookmark
-                                    else -> Icons.Default.Visibility
-                                },
-                                contentDescription = null,
-                                tint = colors.onSurfaceVariant
-                            )
-                        }
-                    )
-                }
-            }
-        }
-    }
-
 
     @Composable
     private fun DetailItem(
