@@ -113,7 +113,7 @@ class YearInReviewScreen : Screen {
                                         modifier = Modifier.weight(1f),
                                         icon = Icons.Default.Movie,
                                         value = uiState.hero.filmCount.toString(),
-                                        label = "Watched"
+                                        label = "Films"
                                     )
                                     HeroStatCard(
                                         modifier = Modifier.weight(1f),
@@ -137,6 +137,11 @@ class YearInReviewScreen : Screen {
                                         label = "Revenue"
                                     )
                                 }
+                            }
+
+                            item {
+                                Text(uiState.hero.viewingCount.toString() + " viewings across " + uiState.hero.filmCount + " films",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
 
                             item {
@@ -209,7 +214,7 @@ class YearInReviewScreen : Screen {
 
                             item {
                                 if (uiState.milestones.isNotEmpty()) {
-                                    SectionCard(title = "Milestones") {
+                                    SectionCard(title = "Viewing milestones") {
                                         MilestonesSection(
                                             rows = uiState.milestones,
                                             onMovieClick = { movie -> navigator.push(MovieDetailScreen(movie)) })

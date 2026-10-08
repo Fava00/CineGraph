@@ -250,7 +250,7 @@ private fun MonthHeaderCard(
                 )
 
                 Text(
-                    text = "$monthMovieCount watched",
+                    text = "$monthMovieCount viewings",
                     color = colors.onSurfaceVariant,
                     style = if (compact) {
                         MaterialTheme.typography.bodySmall

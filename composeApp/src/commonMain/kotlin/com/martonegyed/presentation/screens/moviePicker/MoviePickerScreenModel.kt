@@ -1,26 +1,16 @@
 package com.martonegyed.presentation.screens.moviePicker
 
+import com.martonegyed.domain.repository.DiscoveryRepository
+import com.martonegyed.domain.model.MoviePickerSearchSource
+import com.martonegyed.domain.model.MoviePickerWatchIntent
+import com.martonegyed.domain.model.MoviePickerRequest
+import com.martonegyed.domain.model.MovieGenre
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.martonegyed.core.AppLogger
-import com.martonegyed.data.database.CineGraphDatabase
-import com.martonegyed.data.remote.TmdbApiService
-import com.martonegyed.data.remote.TmdbGenre
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-
-enum class MoviePickerSearchSource {
-    MY_LIBRARY,
-    DISCOVER_NEW,
-    BOTH
-}
-
-enum class MoviePickerWatchIntent {
-    SOMETHING_NEW,
-    REWATCH,
-    ANYTHING
-}
 
 enum class TriStateFilter {
     NEUTRAL,
@@ -44,23 +34,11 @@ data class DecadeOption(
     val label: String
 )
 
-data class MoviePickerRequest(
-    val source: MoviePickerSearchSource,
-    val searchDepth: Int,
-    val watchIntent: MoviePickerWatchIntent,
-    val includedGenreIds: Set<Int>,
-    val excludedGenreIds: Set<Int>,
-    val runtimeMinutes: IntRange,
-    val minimumRating: Float,
-    val selectedDecades: Set<Int>,
-    val languages: Set<String>,
-)
-
 data class MoviePickerUiState(
     val source: MoviePickerSearchSource = MoviePickerSearchSource.MY_LIBRARY,
     val searchDepth: Int = 100,
     val watchIntent: MoviePickerWatchIntent = MoviePickerWatchIntent.SOMETHING_NEW,
-    val availableGenres: List<TmdbGenre> = emptyList(),
+    val availableGenres: List<MovieGenre> = emptyList(),
     val genreStates: Map<Int, TriStateFilter> = emptyMap(),
     val runtimeRange: ClosedFloatingPointRange<Float> = 0f..240f,
     val minimumRating: Float = 0f,
@@ -86,7 +64,7 @@ data class MoviePickerUiState(
 }
 
 class MoviePickerScreenModel(
-    private val tmdbApiService: TmdbApiService,
+    private val repository: DiscoveryRepository,
 ) : ScreenModel {
 
     private val _uiState = MutableStateFlow(
@@ -168,12 +146,13 @@ class MoviePickerScreenModel(
         screenModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingMeta = true, errorMessage = null)
             try {
-                val response = tmdbApiService.getMovieGenres()
+                val genres = repository.getGenres()
                 _uiState.value = _uiState.value.copy(
                     isLoadingMeta = false,
-                    availableGenres = response?.genres.orEmpty().sortedBy { it.name }
+                    availableGenres = genres.sortedBy { it.name }
                 )
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 AppLogger.exception(
                     tag = "MoviePickerScreenModel",
                     throwable = e,

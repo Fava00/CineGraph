@@ -90,6 +90,13 @@ kotlin {
             implementation(libs.kotlin.test)
         }
 
+        val desktopTest by getting {
+            dependencies {
+                implementation(libs.ktor.client.mock)
+                implementation(libs.kotlinx.coroutines.test)
+            }
+        }
+
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)
@@ -155,4 +162,3 @@ compose.desktop {
         mainClass = "com.martonegyed.MainKt"
     }
 }
-

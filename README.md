@@ -1,4 +1,5 @@
 # CineGraph
+
 Egy Kotlin Multiplatform alkalmazás filmes statisztikák követésére, adatok vizualizálására és új filmek felfedezésére.
 > Ez a projekt a Budapesti Műszaki és Gazdaságtudományi Egyetem (BME) MSc Önálló laboratórium 1. illetve 2. tárgyak keretein belül készült. Támogatott platformok: Android, iOS és Desktop.
 

@@ -1,5 +1,8 @@
 package com.martonegyed.presentation.screens.moviePicker
 
+import com.martonegyed.domain.model.MoviePickerRequest
+import com.martonegyed.domain.model.DiscoveryCandidate
+import com.martonegyed.domain.model.stableKey
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -217,7 +220,7 @@ private fun MoviePickerSwipeDeck(
     onUndo: () -> Unit,
     onDismissUndo: () -> Unit,
     onOpenMightWatch: () -> Unit,
-    onOpenMovie: (MoviePickerCandidateUi) -> Unit
+    onOpenMovie: (DiscoveryCandidate) -> Unit
 ) {
     val currentMovie = uiState.queue.lastOrNull()
     val nextMovie = uiState.queue.dropLast(1).lastOrNull()
@@ -410,7 +413,7 @@ private fun EmptyResultsState(
 
 @Composable
 private fun DeckBackgroundCard(
-    movie: MoviePickerCandidateUi,
+    movie: DiscoveryCandidate,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -430,7 +433,7 @@ private fun DeckBackgroundCard(
 
 @Composable
 private fun SwipeableMovieCard(
-    movie: MoviePickerCandidateUi,
+    movie: DiscoveryCandidate,
     modifier: Modifier = Modifier,
     onSwipeLeft: () -> Unit,
     onSwipeRight: () -> Unit,
@@ -536,7 +539,7 @@ private fun SwipeLabel(
 }
 
 @Composable
-private fun MoviePosterCardContent(movie: MoviePickerCandidateUi) {
+private fun MoviePosterCardContent(movie: DiscoveryCandidate) {
     Box(modifier = Modifier.fillMaxSize()) {
         if (movie.posterPath != null) {
             AsyncImage(
@@ -637,8 +640,8 @@ private fun DeckActionButton(
 
 @Composable
 private fun MightWatchSheet(
-    movies: List<MoviePickerCandidateUi>,
-    onRemove: (MoviePickerCandidateUi) -> Unit,
+    movies: List<DiscoveryCandidate>,
+    onRemove: (DiscoveryCandidate) -> Unit,
     onClose: () -> Unit
 ) {
     Column(

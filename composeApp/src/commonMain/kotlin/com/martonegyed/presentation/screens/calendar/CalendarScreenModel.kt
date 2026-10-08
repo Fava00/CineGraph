@@ -1,12 +1,9 @@
 package com.martonegyed.presentation.screens.calendar
 
-import app.cash.sqldelight.coroutines.asFlow
-import app.cash.sqldelight.coroutines.mapToList
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.martonegyed.data.database.CineGraphDatabase
+import com.martonegyed.domain.repository.AnalyticsRepository
 import com.martonegyed.domain.model.Movie
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -65,7 +62,7 @@ private data class DateParts(
 )
 
 class CalendarScreenModel(
-    private val database: CineGraphDatabase
+    private val repository: AnalyticsRepository
 ) : ScreenModel {
 
     private val _state = MutableStateFlow(CinemaCalendarState())
@@ -112,12 +109,12 @@ class CalendarScreenModel(
         dbJob?.cancel()
 
         dbJob = screenModelScope.launch {
-            database.movieEntityQueries
-                .getWatchedCollectionRows(::mapCollectionRow)
-                .asFlow()
-                .mapToList(Dispatchers.Default)
-                .collect { rows ->
-                    allWatchedMovies = rows.sortedByDescending { it.watchedDate.orEmpty() }
+            repository.observeSnapshots()
+                .collect { snapshot ->
+                    allWatchedMovies = snapshot.viewings.map { row ->
+                        CalendarMovieItem(row.id, row.name, row.year, row.posterPath, row.tmdbId,
+                            row.letterboxdUri, row.imdbId, row.rating, row.watchedDate)
+                    }.sortedByDescending { it.watchedDate.orEmpty() }
 
                     if (!monthInitialized) {
                         initializeMonthFromLatestWatch()
@@ -237,30 +234,6 @@ class CalendarScreenModel(
 
         return result
     }
-
-    private fun mapCollectionRow(
-        id: Long,
-        name: String,
-        year: Long,
-        posterPath: String?,
-        tmdbId: String?,
-        letterboxdUri: String?,
-        imdbId: String?,
-        tmdbVoteAverage: Double?,
-        userRating: Double?,
-        watchedDate: String?,
-        watchlistDate: String?
-    ): CalendarMovieItem = CalendarMovieItem(
-        id = id.toInt(),
-        name = name,
-        year = year.toInt(),
-        posterPath = posterPath,
-        tmdbId = tmdbId?.toIntOrNull(),
-        letterboxdUri = letterboxdUri,
-        imdbId = imdbId,
-        rating = userRating,
-        watchedDate = watchedDate
-    )
 
     private fun parseDate(value: String?): DateParts? {
         if (value.isNullOrBlank() || value.length < 10) return null

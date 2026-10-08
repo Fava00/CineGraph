@@ -1,0 +1,17 @@
+-- Recovery archive for legacy cached credits whose movie no longer exists.
+-- Intentionally has no foreign key; rows retain their original identity and content.
+CREATE TABLE IF NOT EXISTS RecoveryMoviePersonEntity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    originalId INTEGER NOT NULL,
+    movieId INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    job TEXT NOT NULL,
+    character TEXT,
+    profilePath TEXT
+);
+
+INSERT INTO RecoveryMoviePersonEntity(originalId, movieId, name, job, character, profilePath)
+SELECT id, movieId, name, job, character, profilePath FROM MoviePersonEntity
+WHERE NOT EXISTS (SELECT 1 FROM MovieEntity WHERE MovieEntity.id = MoviePersonEntity.movieId);
+DELETE FROM MoviePersonEntity
+WHERE NOT EXISTS (SELECT 1 FROM MovieEntity WHERE MovieEntity.id = MoviePersonEntity.movieId);

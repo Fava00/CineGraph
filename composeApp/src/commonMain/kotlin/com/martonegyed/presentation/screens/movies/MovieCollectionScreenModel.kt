@@ -1,16 +1,14 @@
 package com.martonegyed.presentation.screens.movies
 
-import app.cash.sqldelight.coroutines.asFlow
-import app.cash.sqldelight.coroutines.mapToList
+import com.martonegyed.domain.model.MovieCollectionRow
+import com.martonegyed.domain.model.MovieFilterType
+import com.martonegyed.domain.model.MovieListType
+import com.martonegyed.domain.repository.MovieCollectionRepository
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.martonegyed.core.util.mapCollectionRow
-import com.martonegyed.data.database.CineGraphDatabase
-import com.martonegyed.domain.model.Movie
 import com.martonegyed.presentation.analytics.StatRange
 import com.martonegyed.presentation.components.common.CollectionEntityType
 import com.martonegyed.presentation.screens.movies.CollectionType.*
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,10 +17,6 @@ import kotlin.collections.emptyList
 import kotlin.math.abs
 
 enum class SortOption { DATE_WATCHED, RELEASE_YEAR, RATING, TMDB_RATING, NAME }
-
-enum class MovieFilterType { GENRE, STUDIO, COUNTRY }
-
-enum class MovieListType { WATCHED, WATCHLIST }
 
 enum class CollectionType(val title: String) {
     LIBRARY("My Library"),
@@ -34,40 +28,8 @@ enum class CollectionType(val title: String) {
     CACHED("Cached Movies")
 }
 
-data class MovieCollectionRow(
-    val id: Int,
-    val name: String,
-    val year: Int,
-    val posterPath: String?,
-    val tmdbId: Int?,
-    val letterboxdUri: String?,
-    val imdbId: String?,
-    val tmdbVoteAverage: Double?,
-    val userRating: Double?,
-    val watchedDate: String?,
-    val watchlistDate: String?
-) {
-    fun toMovie(preferWatchlistDate: Boolean = false): Movie =
-        Movie(
-            id = id,
-            name = name,
-            year = year,
-            posterPath = posterPath,
-            tmdbId = tmdbId,
-            letterboxdUri = letterboxdUri,
-            imdbId = imdbId,
-            rating = userRating,
-            watchedDate = if (preferWatchlistDate) {
-                watchlistDate ?: watchedDate
-            } else {
-                watchedDate ?: watchlistDate
-            },
-            tmdbVoteAverage = tmdbVoteAverage
-        )
-}
-
 class MovieCollectionScreenModel(
-    private val database: CineGraphDatabase
+    private val repository: MovieCollectionRepository
 ) : ScreenModel {
     private sealed interface CollectionRequest {
         object Library : CollectionRequest
@@ -287,28 +249,21 @@ class MovieCollectionScreenModel(
     }
 
     private suspend fun observeReactiveCollection(request: CollectionRequest) {
-        val query = when (request) {
-            CollectionRequest.Library ->
-                database.movieEntityQueries.getWatchedCollectionRows(::mapCollectionRow)
-
-            CollectionRequest.Watchlist ->
-                database.movieEntityQueries.getWatchlistCollectionRows(::mapCollectionRow)
-
-            CollectionRequest.Cached ->
-                database.movieEntityQueries.getCachedCollectionRows(::mapCollectionRow)
-
+        val movies = when (request) {
+            CollectionRequest.Library -> repository.observeWatchedMovies()
+            CollectionRequest.Watchlist -> repository.observeWatchlistMovies()
+            CollectionRequest.Cached -> repository.observeCachedMovies()
             else -> error("Reactive loader called with non-reactive request: $request")
         }
 
-        query.asFlow()
-            .mapToList(Dispatchers.Default)
+        movies
             .collect { rows ->
                 allMovies = rows
                 applyFiltersAndSort()
             }
     }
 
-    private fun loadSnapshotCollection(request: CollectionRequest) {
+    private suspend fun loadSnapshotCollection(request: CollectionRequest) {
         _isLoading.value = true
         try {
             allMovies = when (request) {
@@ -324,9 +279,9 @@ class MovieCollectionScreenModel(
         }
     }
 
-    private fun loadRowsForEntity(request: CollectionRequest.ByEntity): List<MovieCollectionRow> {
+    private suspend fun loadRowsForEntity(request: CollectionRequest.ByEntity): List<MovieCollectionRow> {
         val (startDate, endDate) = computeDateRange(request.range, request.year, request.month)
-        val listTypeParam = _currentListType.value.name
+        val listTypeParam = _currentListType.value
 
         return when (request.entityType) {
             CollectionEntityType.DIRECTORS -> loadRowsByPerson(
@@ -387,7 +342,7 @@ class MovieCollectionScreenModel(
         }
     }
 
-    private fun loadRowsForDecade(request: CollectionRequest.ByDecade): List<MovieCollectionRow> {
+    private suspend fun loadRowsForDecade(request: CollectionRequest.ByDecade): List<MovieCollectionRow> {
         val start = request.decadeStart
         val endExclusive = start + 10
 
@@ -400,111 +355,71 @@ class MovieCollectionScreenModel(
         }
     }
 
-    private fun loadRowsForRating(request: CollectionRequest.ByRating): List<MovieCollectionRow> {
+    private suspend fun loadRowsForRating(request: CollectionRequest.ByRating): List<MovieCollectionRow> {
         val rows = loadRowsForCurrentList(request.range, request.year, request.month)
         return rows.filter { row ->
             row.userRating?.let { abs(it - request.rating) < 0.001 } == true
         }
     }
 
-    private fun loadRowsForDuo(request: CollectionRequest.ByDuo): List<MovieCollectionRow> {
+    private suspend fun loadRowsForDuo(request: CollectionRequest.ByDuo): List<MovieCollectionRow> {
         val (startDate, endDate) = computeDateRange(request.range, request.year, request.month)
 
-        return database.movieEntityQueries
-            .getCollectionRowsByDuoAndDate(
-                listType = _currentListType.value.name,
-                firstName = request.firstName,
-                secondName = request.secondName,
-                firstJob = request.firstJob,
-                secondJob = request.secondJob,
-                startDate = startDate,
-                endDate = endDate,
-                mapper = ::mapCollectionRow
-            )
-            .executeAsList()
+        return repository.getMoviesByDuo(
+            listType = _currentListType.value,
+            firstName = request.firstName,
+            secondName = request.secondName,
+            firstJob = request.firstJob,
+            secondJob = request.secondJob,
+            startDate = startDate,
+            endDate = endDate
+        )
     }
 
-    private fun loadRowsForCurrentList(
+    private suspend fun loadRowsForCurrentList(
         range: StatRange = StatRange.ALL_TIME,
         year: Int? = null,
         month: Int? = null
     ): List<MovieCollectionRow> {
-        return when (_currentListType.value) {
-            MovieListType.WATCHED -> {
-                val rows = database.movieEntityQueries
-                    .getWatchedCollectionRows(::mapCollectionRow)
-                    .executeAsList()
+        val rows = repository.getMovies(_currentListType.value)
+        if (_currentListType.value == MovieListType.WATCHLIST) return rows
 
-                val (startDate, endDate) = computeDateRange(range, year, month)
-                if (startDate == null || endDate == null) rows
-                else rows.filter { row ->
-                    val d = row.watchedDate
-                    d != null && d in startDate..endDate
-                }
-            }
-
-            MovieListType.WATCHLIST ->
-                database.movieEntityQueries
-                    .getWatchlistCollectionRows(::mapCollectionRow)
-                    .executeAsList()
+        val (startDate, endDate) = computeDateRange(range, year, month)
+        return if (startDate == null || endDate == null) rows
+        else rows.filter { row ->
+            val date = row.watchedDate
+            date != null && date in startDate..endDate
         }
     }
 
-    private fun loadRowsByPerson(
-        listType: String,
+    private suspend fun loadRowsByPerson(
+        listType: MovieListType,
         personName: String,
         job: String?,
         startDate: String?,
         endDate: String?
     ): List<MovieCollectionRow> =
-        database.movieEntityQueries
-            .getCollectionRowsByPersonAndDate(
-                listType = listType,
-                personName = personName,
-                job = job,
-                startDate = startDate,
-                endDate = endDate,
-                mapper = ::mapCollectionRow
-            )
-            .executeAsList()
+        repository.getMoviesByPerson(listType, personName, job, startDate, endDate)
 
-    private fun loadRowsByPerson(
-        listType: String,
+    private suspend fun loadRowsByPerson(
+        listType: MovieListType,
         personName: String,
         jobs: List<String>,
         startDate: String?,
         endDate: String?
     ): List<MovieCollectionRow> =
         jobs.flatMap { job ->
-            database.movieEntityQueries
-                .getCollectionRowsByPersonAndDate(
-                    listType = listType,
-                    personName = personName,
-                    job = job,
-                    startDate = startDate,
-                    endDate = endDate,
-                    mapper = ::mapCollectionRow
-                )
-                .executeAsList()
+            repository.getMoviesByPerson(listType, personName, job, startDate, endDate)
         }.distinctBy { it.id }
 
-    private fun loadRowsByFilter(
-        listType: String,
+    private suspend fun loadRowsByFilter(
+        listType: MovieListType,
         filterType: MovieFilterType,
         filterName: String,
         startDate: String?,
         endDate: String?
     ): List<MovieCollectionRow> =
-        database.movieEntityQueries
-            .getCollectionRowsByFilterAndDate(
-                listType = listType,
-                filterType = filterType.name,
-                filterName = filterName,
-                startDate = startDate,
-                endDate = endDate,
-                mapper = ::mapCollectionRow
-            )
-            .executeAsList()
+        repository.getMoviesByFilter(listType, filterType, filterName, startDate, endDate)
 
     private fun computeDateRange(
         range: StatRange,

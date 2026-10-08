@@ -1,6 +1,6 @@
 package com.martonegyed.domain.model
 
-import com.martonegyed.presentation.screens.moviePicker.MoviePickerCandidateUi
+import com.martonegyed.domain.model.DiscoveryCandidate
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -56,7 +56,7 @@ data class Movie(
         get() = crew?.filter { it.job == "Screenplay" || it.job == "Writer" } ?: emptyList()
 }
 
-fun MoviePickerCandidateUi.toMovie(): Movie = Movie(
+fun DiscoveryCandidate.toMovie(): Movie = Movie(
     name = title,
     posterPath = posterPath,
     year = year?.toInt() ?: 0,

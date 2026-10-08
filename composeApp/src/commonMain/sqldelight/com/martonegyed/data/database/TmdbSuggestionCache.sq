@@ -1,0 +1,29 @@
+CREATE TABLE TmdbSuggestionCache (
+    movieId INTEGER NOT NULL PRIMARY KEY REFERENCES MovieEntity(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    year INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    candidatesJson TEXT NOT NULL,
+    searchJson TEXT,
+    updatedAt INTEGER NOT NULL
+);
+
+getSuggestionCache:
+SELECT * FROM TmdbSuggestionCache WHERE movieId = :movieId;
+
+getReadySuggestions:
+SELECT c.* FROM TmdbSuggestionCache c JOIN MovieEntity m ON m.id = c.movieId
+WHERE m.tmdbId = '-1' AND c.state = 'ready-v3' AND c.name = m.name AND c.year = m.year;
+
+putSuggestionCache:
+INSERT OR REPLACE INTO TmdbSuggestionCache(movieId, name, year, state, candidatesJson, searchJson, updatedAt)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+dismissSuggestion:
+UPDATE TmdbSuggestionCache SET state = 'dismissed' WHERE movieId = :movieId;
+
+clearUnmatchedSuggestionCache:
+DELETE FROM TmdbSuggestionCache WHERE movieId IN (SELECT id FROM MovieEntity WHERE tmdbId = '-1');
+
+deleteResolvedSuggestions:
+DELETE FROM TmdbSuggestionCache WHERE movieId IN (SELECT id FROM MovieEntity WHERE tmdbId IS NOT NULL AND tmdbId <> '-1');

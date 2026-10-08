@@ -1,5 +1,7 @@
 package com.martonegyed.presentation.screens.moviePicker
 
+import com.martonegyed.domain.repository.DiscoveryManagerRepository
+import com.martonegyed.domain.model.DiscoveryMovie
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,19 +38,11 @@ class DiscoveryManagerScreenModel(
         }
     }
 
-    fun unignore(movie: DiscoveryManagerMovieUi) {
+    fun unignore(movie: DiscoveryMovie) {
         val tmdbId = movie.tmdbId ?: return
         screenModelScope.launch {
             repository.unignoreMovie(tmdbId)
             refresh()
         }
     }
-}
-
-interface DiscoveryManagerRepository {
-    suspend fun getCachedMovies(): List<DiscoveryManagerMovieUi>
-    suspend fun getIgnoredMovies(): List<DiscoveryManagerMovieUi>
-    suspend fun ignoreMovie(movie: MoviePickerCandidateUi)
-    suspend fun unignoreMovie(tmdbId: Int)
-    suspend fun isIgnored(tmdbId: Int): Boolean
 }

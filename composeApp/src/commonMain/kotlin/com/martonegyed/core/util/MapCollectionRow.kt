@@ -1,6 +1,6 @@
 package com.martonegyed.core.util
 
-import com.martonegyed.presentation.screens.movies.MovieCollectionRow
+import com.martonegyed.domain.model.MovieCollectionRow
 
 fun mapCollectionRow(
     id: Long,
